@@ -1,0 +1,553 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'OCR Legal Documents Processing System - Simplified Version'
+
+# =====================================
+# PARÁMETROS
+# =====================================
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    
+  MistralApiKey:
+    Type: String
+    NoEcho: true
+    Description: Mistral API Key for OCR processing
+  
+  S3BucketName:
+    Type: String
+    Default: ocr-legal-documents-dev
+    Description: S3 bucket for document storage
+    
+  CreatioApiEndpoint:
+    Type: String
+    Default: https://api.creatio.com
+    Description: Creatio CRM API endpoint
+    
+  CreatioApiKey:
+    Type: String
+    NoEcho: true
+    Default: your-creatio-api-key
+    Description: Creatio CRM API key
+    
+  EnableDynamoDB:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Enable DynamoDB tables for tracking
+
+  SESFromEmail:
+    Type: String
+    Default: "edwin.penalba@cibernetica.net"
+    Description: Email address for sending notifications
+    
+  SESReceiveEmail:
+    Type: String
+    Default: "oficios@cibernetica.xyz"  
+    Description: Email address for receiving documents
+
+  NotificationEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Enable email notifications
+
+# =====================================
+# GLOBALS
+# =====================================
+Globals:
+  Function:
+    Timeout: 900
+    MemorySize: 512
+    Runtime: python3.9
+    Architectures: [x86_64]
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        S3_BUCKET_NAME: !Ref S3BucketName
+        MISTRAL_API_KEY: !Ref MistralApiKey
+        SAVE_TO_DYNAMODB: !Ref EnableDynamoDB
+        SES_FROM_EMAIL: !Ref SESFromEmail
+        NOTIFICATION_ENABLED: !Ref NotificationEnabled
+
+# =====================================
+# CONDITIONS
+# =====================================
+Conditions:
+  EnableDynamoDBCondition: !Equals [!Ref EnableDynamoDB, 'true']
+  EnableNotificationsCondition: !Equals [!Ref NotificationEnabled, 'true']
+
+# =====================================
+# RESOURCES
+# =====================================
+Resources:
+
+  # =====================================
+  # S3 BUCKET
+  # =====================================
+  DocumentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 90
+            Prefix: logs/
+          - Id: TransitionEmailsToIA
+            Status: Enabled
+            Transition:
+              StorageClass: STANDARD_IA
+              TransitionInDays: 30
+            Prefix: emails/
+
+  # =====================================
+  # BUCKET POLICY PARA SES
+  # =====================================
+  DocumentBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DocumentBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSESPuts
+            Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource: !Sub "arn:aws:s3:::${DocumentBucket}/*"
+            Condition:
+              StringEquals:
+                's3:x-amz-acl': bucket-owner-full-control
+
+  # =====================================
+  # IAM ROLE PARA SES
+  # =====================================
+  SESDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SESDeliveryPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource: !Sub "arn:aws:s3:::${DocumentBucket}/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                Resource: !Sub "arn:aws:s3:::${DocumentBucket}"
+
+  # =====================================
+  # SNS TOPIC PARA NOTIFICACIONES
+  # =====================================
+  EmailNotificationTopic:
+    Type: AWS::SNS::Topic
+    Condition: EnableNotificationsCondition
+    Properties:
+      DisplayName: "Email Processing Notifications"
+
+  # =====================================
+  # DYNAMODB TABLES
+  # =====================================
+  TrackingTable:
+    Type: AWS::DynamoDB::Table
+    Condition: EnableDynamoDBCondition
+    Properties:
+      TableName: !Sub "${AWS::StackName}-tracking"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: batch_id
+          AttributeType: S
+        - AttributeName: oficio_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: batch_id
+          KeyType: HASH
+        - AttributeName: oficio_id
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: EnableDynamoDBCondition
+    Properties:
+      TableName: !Sub "${AWS::StackName}-jobs"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # =====================================
+  # API GATEWAY
+  # =====================================
+  OcrApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "${AWS::StackName}-ocr-api"
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
+
+  # =====================================
+  # SQS QUEUES
+  # =====================================
+  ProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-processing-queue"
+      VisibilityTimeout: 960
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  CrmQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-crm-queue"
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-dlq"
+      MessageRetentionPeriod: 1209600
+
+  # =====================================
+  # LAMBDA FUNCTIONS
+  # =====================================
+  
+  RouterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-router"
+      CodeUri: src/router/
+      Handler: app.lambda_handler
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref ProcessingQueue
+          TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
+          JOBS_TABLE: !If [EnableDynamoDBCondition, !Ref JobsTable, ""]
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref S3BucketName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt ProcessingQueue.QueueName
+        - !If
+          - EnableDynamoDBCondition
+          - DynamoDBCrudPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
+      Events:
+        ApiPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OcrApi
+            Path: /document
+            Method: post
+
+  ProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-processor"
+      CodeUri: src/
+      Handler: processor/app.lambda_handler
+      MemorySize: 3008
+      Timeout: 900
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          CRM_QUEUE_URL: !Ref CrmQueue
+          TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
+          JOBS_TABLE: !If [EnableDynamoDBCondition, !Ref JobsTable, ""]
+          RESULTS_BUCKET: !Ref S3BucketName
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref S3BucketName
+        - SQSPollerPolicy:
+            QueueName: !GetAtt ProcessingQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt CrmQueue.QueueName
+        - !If
+          - EnableDynamoDBCondition
+          - DynamoDBCrudPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ProcessingQueue.Arn
+            BatchSize: 1
+
+  StatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-status"
+      CodeUri: src/status/
+      Handler: app.lambda_handler
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          RESULTS_BUCKET: !Ref S3BucketName
+          TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref S3BucketName
+        - !If
+          - EnableDynamoDBCondition
+          - DynamoDBReadPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
+      Events:
+        ApiGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OcrApi
+            Path: /document/status/{job_id}
+            Method: get
+
+  RetryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-retry"
+      CodeUri: src/retry/
+      Handler: app.lambda_handler
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          JOBS_TABLE_NAME: !If [EnableDynamoDBCondition, !Ref JobsTable, ""]
+          QUEUE_URL: !Ref ProcessingQueue
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref S3BucketName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt ProcessingQueue.QueueName
+        - !If
+          - EnableDynamoDBCondition
+          - DynamoDBCrudPolicy:
+              TableName: !Ref JobsTable
+          - !Ref AWS::NoValue
+
+  # =====================================
+  # EMAIL PROCESSOR FUNCTION
+  # =====================================
+  EmailProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-email-processor"
+      CodeUri: src/email_processor/
+      Handler: app.lambda_handler
+      MemorySize: 2048
+      Timeout: 600
+      Environment:
+        Variables:
+          OCR_QUEUE_URL: !Ref ProcessingQueue
+          TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref S3BucketName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt ProcessingQueue.QueueName
+        - !If
+          - EnableDynamoDBCondition
+          - DynamoDBCrudPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
+        - Statement:
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+              - ses:SendRawEmail
+            Resource: "*"
+      Events:
+        S3EmailEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref DocumentBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: emails/
+
+  # =====================================
+  # CRM INTEGRATOR FUNCTION
+  # =====================================
+  CrmIntegratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-crm-integrator"
+      CodeUri: src/crm_integrator/
+      Handler: app.lambda_handler
+      MemorySize: 1024
+      Timeout: 300
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref S3BucketName
+          TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
+          CREATIO_API_ENDPOINT: !Ref CreatioApiEndpoint
+          CREATIO_API_KEY: !Ref CreatioApiKey
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref S3BucketName
+        - SQSPollerPolicy:
+            QueueName: !GetAtt CrmQueue.QueueName
+        - !If
+          - EnableDynamoDBCondition
+          - DynamoDBCrudPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
+      Events:
+        CrmQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CrmQueue.Arn
+            BatchSize: 1
+
+  # =====================================
+  # BATCH STATUS FUNCTION
+  # =====================================
+  BatchStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-batch-status"
+      CodeUri: src/batch_status/
+      Handler: app.lambda_handler
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
+      Policies:
+        - !If
+          - EnableDynamoDBCondition
+          - DynamoDBReadPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
+      Events:
+        ApiGetBatch:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OcrApi
+            Path: /batch/status/{batch_id}
+            Method: get
+
+  # =====================================
+  # NOTIFICATION FUNCTION
+  # =====================================
+  NotificationFunction:
+    Type: AWS::Serverless::Function
+    Condition: EnableNotificationsCondition
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-notification"
+      CodeUri: src/notification/
+      Handler: app.lambda_handler
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          SES_FROM_EMAIL: !Ref SESFromEmail
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+              - ses:SendRawEmail
+            Resource: "*"
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref EmailNotificationTopic
+
+# =====================================
+# OUTPUTS
+# =====================================
+Outputs:
+  ApiGatewayUrl:
+    Description: URL del API Gateway
+    Value: !Sub "https://${OcrApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+
+  DocumentEndpoint:
+    Description: Endpoint para procesar documentos
+    Value: !Sub "https://${OcrApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/document"
+
+  StatusEndpoint:
+    Description: Endpoint para consultar estado
+    Value: !Sub "https://${OcrApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/document/status/{job_id}"
+
+  BatchStatusEndpoint:
+    Description: Endpoint para consultar estado de lotes
+    Value: !Sub "https://${OcrApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/batch/status/{batch_id}"
+
+  S3BucketName:
+    Description: Nombre del bucket S3
+    Value: !Ref S3BucketName
+
+  SESDeliveryRoleArn:
+    Description: ARN del role para SES delivery
+    Value: !GetAtt SESDeliveryRole.Arn
+
+  EmailNotificationTopicArn:
+    Condition: EnableNotificationsCondition
+    Description: ARN del topic SNS para notificaciones
+    Value: !Ref EmailNotificationTopic
+
+  SESReceiveEmail:
+    Description: Email para recepción de documentos
+    Value: !Ref SESReceiveEmail
+
+  SESFromEmail:
+    Description: Email para envío de notificaciones
+    Value: !Ref SESFromEmail
