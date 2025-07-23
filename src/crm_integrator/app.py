@@ -4,8 +4,11 @@ import boto3
 import logging
 import os
 import requests
+import urllib.request
+import urllib.parse
+import http.cookiejar
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # Configuración de logging
 logger = logging.getLogger()
@@ -18,8 +21,9 @@ dynamodb = boto3.resource('dynamodb')
 # Variables de entorno
 S3_BUCKET_NAME = os.environ['S3_BUCKET_NAME']
 TRACKING_TABLE = os.environ['TRACKING_TABLE']
-CREATIO_API_ENDPOINT = os.environ['CREATIO_API_ENDPOINT']
-CREATIO_API_KEY = os.environ['CREATIO_API_KEY']
+CREATIO_URL = os.environ.get('CREATIO_URL', 'https://11006608-demo.creatio.com')
+CREATIO_USERNAME = os.environ.get('CREATIO_USERNAME', 'Supervisor')
+CREATIO_PASSWORD = os.environ.get('CREATIO_PASSWORD', '!k*ZPCT&MkuF2cDiM!S')
 
 def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """
@@ -337,14 +341,24 @@ def format_persons_for_creatio(personas: List[Dict[str, Any]]) -> List[Dict[str,
     formatted_persons = []
     
     for persona in personas:
+        # Separar nombre completo en partes
+        nombre_completo = persona.get('nombre_completo', '')
+        nombres = nombre_completo.split()
+        
+        nombre = nombres[0] if nombres else ''
+        apellido_paterno = nombres[1] if len(nombres) > 1 else ''
+        apellido_materno = nombres[2] if len(nombres) > 2 else ''
+        nombre_segundo = nombres[3] if len(nombres) > 3 else ''
+        
         formatted_person = {
-            "FullName": persona.get('nombre_completo', ''),
-            "Identification": persona.get('identificacion', ''),
-            "IdentificationType": persona.get('tipo_identificacion', ''),
-            "Amount": persona.get('monto_numerico', 0),
-            "AmountText": persona.get('monto_texto', ''),
-            "ExpedientNumber": persona.get('expediente', ''),
-            "Sequence": persona.get('secuencia', 0)
+            "nombre": nombre,
+            "apellido_paterno": apellido_paterno,
+            "apellido_materno": apellido_materno,
+            "nombre_segundo": nombre_segundo,
+            "identificacion": persona.get('identificacion', ''),
+            "monto_numerico": persona.get('monto_numerico', 0.0),
+            "expediente": persona.get('expediente', ''),
+            "observaciones": f"Persona extraída por OCR - Secuencia: {persona.get('secuencia', 0)}"
         }
         formatted_persons.append(formatted_person)
     
@@ -366,73 +380,209 @@ def format_autos_for_creatio(autos: List[Dict[str, Any]]) -> List[Dict[str, Any]
     
     return formatted_autos
 
+class CreatioService:
+    def __init__(self, url, username, password):
+        self.url = url
+        self.username = username
+        self.password = password
+        self.bpmcsrf = None
+        self.cookie_jar = None
+    
+    def authenticate(self):
+        """Autentica con Creatio y obtiene las cookies de sesión"""
+        logger.info("🔐 Autenticando con Creatio...")
+        auth_url = f"{self.url}/ServiceModel/AuthService.svc/Login"
+
+        self.cookie_jar = http.cookiejar.CookieJar()
+        cookie_handler = urllib.request.HTTPCookieProcessor(self.cookie_jar)
+        opener = urllib.request.build_opener(cookie_handler)
+
+        data = json.dumps({
+            "UserName": self.username, 
+            "UserPassword": self.password
+        }).encode("utf-8")
+        
+        request = urllib.request.Request(
+            auth_url, 
+            data=data, 
+            headers={"Content-Type": "application/json"}
+        )
+        response = opener.open(request)
+
+        if response.status == 200:
+            self.bpmcsrf = next(
+                (cookie.value for cookie in self.cookie_jar if cookie.name == "BPMCSRF"), 
+                None
+            )
+            if self.bpmcsrf:
+                logger.info(f"✅ Autenticación exitosa. BPMCSRF: {self.bpmcsrf[:20]}...")
+                return True
+            else:
+                raise Exception("No se encontró la cookie BPMCSRF")
+        else:
+            raise Exception("Error de autenticación: " + response.read().decode("utf-8"))
+    
+    def _get_headers(self):
+        """Prepara los headers estándar para las peticiones"""
+        cookie_header = "; ".join([
+            f"{cookie.name}={cookie.value}" for cookie in self.cookie_jar
+        ])
+        return {
+            "Content-Type": "application/json",
+            "BPMCSRF": self.bpmcsrf,
+            "Cookie": cookie_header
+        }
+    
+    def create_case(self, subject, notes, priority_id="d9bd322c-f46b-1410-ee8c-0050ba5d6c38"):
+        """Crea un caso en Creatio"""
+        logger.info("📋 Creando caso en Creatio...")
+        
+        url = f"{self.url}/0/odata/case"
+        
+        # Datos del caso
+        case_data = {
+            "CreatedOn": datetime.utcnow().isoformat() + "Z",
+            "CreatedById": "410006e1-ca4e-4502-a9ec-e54d922d2c00",
+            "ModifiedOn": datetime.utcnow().isoformat() + "Z",
+            "ModifiedById": "410006e1-ca4e-4502-a9ec-e54d922d2c00",
+            "ProcessListeners": 2,
+            "RegisteredOn": datetime.utcnow().isoformat() + "Z",
+            "Subject": subject,
+            "Symptoms": subject,
+            "StatusId": "ae5f2f10-f46b-1410-fd9a-0050ba5d6c38",
+            "Notes": notes,
+            "PriorityId": priority_id,
+            "OriginId": "5e5e202a-f46b-1410-3692-0050ba5d6c38",
+            "AccountId": "e308b781-3c5b-4ecb-89ef-5c1ed4da488e",
+            "ResponseOverdue": False,
+            "SolutionOverdue": False,
+            "SatisfactionLevelComment": "",
+            "SolutionRemains": 0.0,
+            "SupportLevelId": "ff7f2f92-f36b-1410-3d9c-0050ba5d6c38",
+            "FirstSolutionProvidedOn": "0001-01-01T00:00:00Z"
+        }
+        
+        try:
+            data = json.dumps(case_data).encode("utf-8")
+            request = urllib.request.Request(url, data=data, headers=self._get_headers())
+            request.get_method = lambda: 'POST'
+            
+            response = urllib.request.urlopen(request)
+            response_data = response.read().decode("utf-8")
+            
+            if response.status == 201:
+                logger.info("✅ Caso creado exitosamente")
+                created_case = json.loads(response_data)
+                case_id = created_case.get("Id")
+                logger.info(f"ID del caso creado: {case_id}")
+                return case_id
+            else:
+                raise Exception(f"Error al crear caso: {response.status} - {response_data}")
+                
+        except urllib.error.HTTPError as e:
+            error_response = e.read().decode("utf-8")
+            logger.error(f"❌ Error HTTP al crear caso: {e.code}")
+            logger.error(f"Respuesta de error: {error_response}")
+            raise Exception(f"Error HTTP {e.code} al crear caso: {error_response}")
+    
+    def create_person_record(self, case_id, person_data):
+        """Crea un registro de persona en NdosPersonasOCR"""
+        logger.info(f"👤 Creando registro de persona para caso {case_id}...")
+        
+        url = f"{self.url}/0/odata/NdosPersonasOCR"
+        
+        # Mapear datos de la persona
+        persona_record = {
+            "CreatedOn": datetime.utcnow().isoformat() + "Z",
+            "CreatedById": "410006e1-ca4e-4502-a9ec-e54d922d2c00",
+            "ModifiedOn": datetime.utcnow().isoformat() + "Z",
+            "ModifiedById": "410006e1-ca4e-4502-a9ec-e54d922d2c00",
+            "ProcessListeners": 0,
+            "NdosObservaciones": person_data.get('observaciones', ''),
+            "NdosImporte": person_data.get('monto_numerico', 0.0),
+            "NdosIdentificacionNumero": person_data.get('identificacion', ''),
+            "NdosApellidoMaterno": person_data.get('apellido_materno', ''),
+            "NdosApellidoPaterno": person_data.get('apellido_paterno', ''),
+            "NdosNombreSegundo": person_data.get('nombre_segundo', ''),
+            "NdosNombre": person_data.get('nombre', ''),
+            "NdosExpediente": person_data.get('expediente', ''),
+            "NdosOficioId": case_id
+        }
+        
+        try:
+            data = json.dumps(persona_record).encode("utf-8")
+            request = urllib.request.Request(url, data=data, headers=self._get_headers())
+            request.get_method = lambda: 'POST'
+            
+            response = urllib.request.urlopen(request)
+            response_data = response.read().decode("utf-8")
+            
+            if response.status == 201:
+                logger.info("✅ Registro de persona creado exitosamente")
+                created_person = json.loads(response_data)
+                person_id = created_person.get("Id")
+                logger.info(f"ID de la persona creada: {person_id}")
+                return person_id
+            else:
+                raise Exception(f"Error al crear persona: {response.status} - {response_data}")
+                
+        except urllib.error.HTTPError as e:
+            error_response = e.read().decode("utf-8")
+            logger.error(f"❌ Error HTTP al crear persona: {e.code}")
+            logger.error(f"Respuesta de error: {error_response}")
+            raise Exception(f"Error HTTP {e.code} al crear persona: {error_response}")
+
 def create_creatio_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Crea solicitud en Creatio CRM
+    Crea caso en Creatio y registra personas encontradas
     """
     try:
-        logger.info("🚀 Enviando solicitud a Creatio...")
+        logger.info("🚀 Iniciando integración con Creatio...")
         
-        # Headers para API de Creatio
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {CREATIO_API_KEY}',
-            'Accept': 'application/json'
+        # Inicializar servicio de Creatio
+        creatio = CreatioService(CREATIO_URL, CREATIO_USERNAME, CREATIO_PASSWORD)
+        
+        # Autenticar
+        creatio.authenticate()
+        
+        # Crear caso
+        subject = f"Oficio: {payload.get('OficioNumber', 'Sin número')} - {payload.get('Authority', 'Sin autoridad')}"
+        notes = f"Oficio procesado automáticamente por OCR\nCliente: {payload.get('ClientTarget', 'No especificado')}\nMonto: {payload.get('Amount', 0)}"
+        
+        case_id = creatio.create_case(subject, notes)
+        
+        # Crear registros de personas si existen
+        personas = payload.get('InvolvedPersons', [])
+        created_persons = []
+        
+        for persona in personas:
+            try:
+                person_id = creatio.create_person_record(case_id, persona)
+                created_persons.append({
+                    'person_id': person_id,
+                    'name': persona.get('FullName', 'Sin nombre')
+                })
+            except Exception as e:
+                logger.error(f"❌ Error creando persona {persona.get('FullName', 'Sin nombre')}: {str(e)}")
+                created_persons.append({
+                    'error': str(e),
+                    'name': persona.get('FullName', 'Sin nombre')
+                })
+        
+        logger.info(f"✅ Integración completada: Caso {case_id} con {len(created_persons)} personas")
+        
+        return {
+            'success': True,
+            'crm_id': case_id,
+            'case_id': case_id,
+            'persons_created': len([p for p in created_persons if 'person_id' in p]),
+            'persons_errors': len([p for p in created_persons if 'error' in p]),
+            'persons_details': created_persons
         }
-        
-        # Endpoint para crear solicitud (ajustar según API de Creatio)
-        url = f"{CREATIO_API_ENDPOINT}/0/dataservice/json/SyncReply/SelectQuery"
-        
-        # Payload para Creatio (ajustar según schema)
-        creatio_payload = {
-            "RootSchemaName": "LegalDocumentRequest",  # Ajustar nombre del schema
-            "OperationType": 0,  # Insert
-            "ColumnValues": payload
-        }
-        
-        response = requests.post(
-            url,
-            headers=headers,
-            json=creatio_payload,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            
-            # Extraer ID de la solicitud creada
-            crm_id = result.get('id') or result.get('Id') or 'unknown'
-            
-            logger.info(f"✅ Solicitud creada en Creatio con ID: {crm_id}")
-            
-            return {
-                'success': True,
-                'crm_id': crm_id,
-                'response': result
-            }
-        else:
-            error_msg = f"HTTP {response.status_code}: {response.text}"
-            logger.error(f"❌ Error en API de Creatio: {error_msg}")
-            
-            return {
-                'success': False,
-                'error': error_msg,
-                'status_code': response.status_code
-            }
-        
-    except requests.exceptions.Timeout:
-        error_msg = "Timeout conectando con Creatio API"
-        logger.error(f"⏰ {error_msg}")
-        return {'success': False, 'error': error_msg}
-        
-    except requests.exceptions.RequestException as e:
-        error_msg = f"Error de conexión con Creatio: {str(e)}"
-        logger.error(f"🔌 {error_msg}")
-        return {'success': False, 'error': error_msg}
         
     except Exception as e:
-        error_msg = f"Error inesperado en Creatio API: {str(e)}"
-        logger.error(f"💥 {error_msg}")
+        error_msg = f"Error en integración con Creatio: {str(e)}"
+        logger.error(f"❌ {error_msg}")
         return {'success': False, 'error': error_msg}
 
 def update_tracking_status(batch_id: str, job_id: str, status: str, details: str = ''):
@@ -582,24 +732,18 @@ def check_batch_completion(batch_id: str):
 # Función auxiliar para testing de API de Creatio
 def test_creatio_connection() -> bool:
     """
-    Prueba la conexión con Creatio API
+    Prueba la conexión con Creatio
     """
     try:
-        headers = {
-            'Authorization': f'Bearer {CREATIO_API_KEY}',
-            'Accept': 'application/json'
-        }
+        # Inicializar servicio de Creatio
+        creatio = CreatioService(CREATIO_URL, CREATIO_USERNAME, CREATIO_PASSWORD)
         
-        # Endpoint de prueba (ajustar según API de Creatio)
-        test_url = f"{CREATIO_API_ENDPOINT}/0/ServiceModel/AuthService.svc/GetCurrentUserInfo"
-        
-        response = requests.get(test_url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            logger.info("✅ Conexión con Creatio API exitosa")
+        # Intentar autenticar
+        if creatio.authenticate():
+            logger.info("✅ Conexión con Creatio exitosa")
             return True
         else:
-            logger.error(f"❌ Error de conexión con Creatio: HTTP {response.status_code}")
+            logger.error("❌ Error de autenticación con Creatio")
             return False
             
     except Exception as e:

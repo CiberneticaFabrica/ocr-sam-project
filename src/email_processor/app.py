@@ -27,7 +27,7 @@ dynamodb = boto3.resource('dynamodb')
 S3_BUCKET_NAME = os.environ['S3_BUCKET_NAME']
 OCR_QUEUE_URL = os.environ['OCR_QUEUE_URL']
 TRACKING_TABLE = os.environ['TRACKING_TABLE']
-SES_FROM_EMAIL = os.environ.get('SES_FROM_EMAIL', 'edwin.penalba@cibernetica.net')
+SES_FROM_EMAIL = os.environ.get('SES_FROM_EMAIL', 'notify@softwarefactory.cibernetica.xyz')
 
 def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """
@@ -404,18 +404,15 @@ def process_pdf_with_validation_improved(pdf_content: bytes, batch_id: str, emai
             logger.info("✅ Cantidad declarada coincide exactamente")
             
         else:
-            # Validación estricta - debe ser exacto
-            validation_result['validation_status'] = 'mismatch'
-            if cantidad_extraida < cantidad_declarada:
-                validation_result['error'] = f'Faltan {cantidad_declarada - cantidad_extraida} oficios. Se declararon {cantidad_declarada} pero solo se encontraron {cantidad_extraida}.'
+            # Validación más flexible - permitir procesar si hay oficios
+            if cantidad_extraida > 0:
+                validation_result['success'] = True
+                validation_result['validation_status'] = 'partial_match'
+                logger.info(f"⚠️ Procesando {cantidad_extraida} oficios de {cantidad_declarada} declarados")
             else:
-                validation_result['error'] = f'Se encontraron {cantidad_extraida - cantidad_declarada} oficios adicionales. Se declararon {cantidad_declarada} pero se encontraron {cantidad_extraida}.'
-                validation_result['validation_status'] = 'significant_mismatch'
-                if cantidad_extraida < cantidad_declarada:
-                    validation_result['error'] = f'Faltan {cantidad_declarada - cantidad_extraida} oficios. Se declararon {cantidad_declarada} pero solo se encontraron {cantidad_extraida}.'
-                else:
-                    validation_result['error'] = f'Se encontraron {cantidad_extraida - cantidad_declarada} oficios adicionales. Se declararon {cantidad_declarada} pero se encontraron {cantidad_extraida}.'
-                logger.error(f"❌ Discrepancia significativa: {validation_result['error']}")
+                validation_result['validation_status'] = 'mismatch'
+                validation_result['error'] = f'No se encontraron oficios. Se declararon {cantidad_declarada} pero no se pudieron extraer.'
+                logger.error(f"❌ No se encontraron oficios: {validation_result['error']}")
         
         return validation_result
         
@@ -979,6 +976,7 @@ def create_html_email_template(template_type: str, **kwargs) -> str:
         }
         .content { 
             padding: 40px; 
+            margin-top: -50px;
         }
         .alert-error { 
             background-color: #f8d7da; 

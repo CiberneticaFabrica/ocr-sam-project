@@ -21,16 +21,21 @@ Parameters:
     Default: ocr-legal-documents-dev
     Description: S3 bucket for document storage
     
-  CreatioApiEndpoint:
+  CreatioUrl:
     Type: String
-    Default: https://api.creatio.com
-    Description: Creatio CRM API endpoint
+    Default: https://11006608-demo.creatio.com
+    Description: Creatio CRM URL
     
-  CreatioApiKey:
+  CreatioUsername:
+    Type: String
+    Default: Supervisor
+    Description: Creatio CRM username
+    
+  CreatioPassword:
     Type: String
     NoEcho: true
-    Default: your-creatio-api-key
-    Description: Creatio CRM API key
+    Default: !k*ZPCT&MkuF2cDiM!S
+    Description: Creatio CRM password
     
   EnableDynamoDB:
     Type: String
@@ -40,7 +45,7 @@ Parameters:
 
   SESFromEmail:
     Type: String
-    Default: "edwin.penalba@cibernetica.net"
+    Default: "notify@softwarefactory.cibernetica.xyz"
     Description: Email address for sending notifications
     
   SESReceiveEmail:
@@ -436,8 +441,9 @@ Resources:
         Variables:
           S3_BUCKET_NAME: !Ref S3BucketName
           TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
-          CREATIO_API_ENDPOINT: !Ref CreatioApiEndpoint
-          CREATIO_API_KEY: !Ref CreatioApiKey
+          CREATIO_URL: !Ref CreatioUrl
+          CREATIO_USERNAME: !Ref CreatioUsername
+          CREATIO_PASSWORD: !Ref CreatioPassword
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref S3BucketName

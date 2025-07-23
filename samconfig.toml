@@ -27,9 +27,10 @@ parameter_overrides = [
     "MistralApiKey=fIGM8jrDAuWDzHnidpTJ8sJBWXHXx3qg",
     "EnableDynamoDB=true", 
     "S3BucketName=ocr-legal-documents-dev",
-    "CreatioApiEndpoint=https://api.creatio.com",
-    "CreatioApiKey=your-creatio-api-key",
-    "SESFromEmail=edwin.penalba@cibernetica.net",
+    "CreatioUrl=https://11006608-demo.creatio.com",
+    "CreatioUsername=Supervisor",
+    "CreatioPassword=!k*ZPCT&MkuF2cDiM!S",
+    "SESFromEmail=notify@softwarefactory.cibernetica.xyz",
     "SESReceiveEmail=oficios@cibernetica.xyz",
     "NotificationEnabled=true"
 ]
@@ -70,9 +71,10 @@ parameter_overrides = [
     "MistralApiKey=fIGM8jrDAuWDzHnidpTJ8sJBWXHXx3qg",
     "EnableDynamoDB=true",
     "S3BucketName=ocr-legal-documents-staging",
-    "CreatioApiEndpoint=https://api.creatio.com",
-    "CreatioApiKey=your-creatio-api-key",
-    "SESFromEmail=edwin.penalba@cibernetica.net",
+    "CreatioUrl=https://11006608-demo.creatio.com",
+    "CreatioUsername=Supervisor",
+    "CreatioPassword=!k*ZPCT&MkuF2cDiM!S",
+    "SESFromEmail=notify@softwarefactory.cibernetica.xyz",
     "SESReceiveEmail=oficios@cibernetica.xyz",
     "NotificationEnabled=true"
 ]
@@ -97,9 +99,10 @@ parameter_overrides = [
     "MistralApiKey=fIGM8jrDAuWDzHnidpTJ8sJBWXHXx3qg",
     "EnableDynamoDB=true",  # Habilitar DynamoDB en producción
     "S3BucketName=ocr-legal-documents-prod",
-    "CreatioApiEndpoint=https://api.creatio.com",
-    "CreatioApiKey=your-creatio-api-key",
-    "SESFromEmail=edwin.penalba@cibernetica.net",
+    "CreatioUrl=https://11006608-demo.creatio.com",
+    "CreatioUsername=Supervisor",
+    "CreatioPassword=!k*ZPCT&MkuF2cDiM!S",
+    "SESFromEmail=notify@softwarefactory.cibernetica.xyz",
     "SESReceiveEmail=oficios@cibernetica.xyz",
     "NotificationEnabled=true"
 ]
@@ -126,7 +129,7 @@ parameter_overrides = [
     "S3BucketName=ocr-legal-documents-local",
     "CreatioApiEndpoint=https://api.creatio.com",
     "CreatioApiKey=your-creatio-api-key",
-    "SESFromEmail=edwin.penalba@cibernetica.net",
+    "SESFromEmail=notify@softwarefactory.cibernetica.xyz",
     "SESReceiveEmail=oficios@cibernetica.xyz",
     "NotificationEnabled=true"
 ]
@@ -137,5 +140,5 @@ s3_prefix = "ocr-sam-stack"
 region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-parameter_overrides = "Environment=\"dev\" S3BucketName=\"ocr-legal-documents-dev\" CreatioApiEndpoint=\"https://api.creatio.com\" EnableDynamoDB=\"true\" SESFromEmail=\"edwin.penalba@cibernetica.net\" SESReceiveEmail=\"oficios@cibernetica.xyz\" NotificationEnabled=\"true\""
+parameter_overrides = "Environment=\"dev\" S3BucketName=\"ocr-legal-documents-dev\" CreatioApiEndpoint=\"https://api.creatio.com\" EnableDynamoDB=\"true\" SESFromEmail=\"notify@softwarefactory.cibernetica.xyz\" SESReceiveEmail=\"oficios@cibernetica.xyz\" NotificationEnabled=\"true\""
 image_repositories = []
