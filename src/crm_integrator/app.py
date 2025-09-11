@@ -152,7 +152,30 @@ def map_ocr_data_to_creatio(ocr_data: Dict[str, Any], job_id: str, batch_id: str
     try:
         # Extraer información principal
         info_extraida = ocr_data.get('informacion_extraida', {})
-        personas = ocr_data.get('lista_personas', {}).get('listado', [])
+        
+        # Manejar diferentes estructuras de lista_personas
+        lista_personas_raw = ocr_data.get('lista_personas', {})
+        logger.info(f"🔍 Debug - lista_personas type: {type(lista_personas_raw)}")
+        logger.info(f"🔍 Debug - lista_personas content: {str(lista_personas_raw)[:200]}...")
+        
+        if isinstance(lista_personas_raw, dict):
+            personas = lista_personas_raw.get('listado', [])
+            monto_total = lista_personas_raw.get('monto_total', 0)
+            logger.info(f"✅ Usando estructura dict - personas: {len(personas)}")
+        elif isinstance(lista_personas_raw, list):
+            personas = lista_personas_raw
+            monto_total = sum(persona.get('monto_numerico', 0) for persona in personas)
+            logger.info(f"✅ Usando estructura list - personas: {len(personas)}")
+        else:
+            personas = []
+            monto_total = 0
+            logger.warning(f"⚠️ Estructura desconocida para lista_personas: {type(lista_personas_raw)}")
+        
+        # Función auxiliar para asegurar string no vacío
+        def ensure_non_empty_string(value, default="No especificado"):
+            if not value or str(value).strip() in ['', 'null', 'None', 'No especificado', 'No especificada']:
+                return default
+            return str(value).strip()
         
         # Datos principales del oficio
         crm_payload = {
@@ -162,46 +185,46 @@ def map_ocr_data_to_creatio(ocr_data: Dict[str, Any], job_id: str, batch_id: str
             "DocumentType": "Oficio Legal",
             
             # Información básica del oficio
-            "OficioNumber": info_extraida.get('numero_oficio', ''),
-            "Authority": info_extraida.get('autoridad', ''),
-            "IssueDate": parse_date_for_creatio(info_extraida.get('fecha_emision', '')),
-            "ReceivedDate": parse_date_for_creatio(info_extraida.get('fecha_recibido', '')),
+            "OficioNumber": ensure_non_empty_string(info_extraida.get('numero_oficio', '')),
+            "Authority": ensure_non_empty_string(info_extraida.get('autoridad', '')),
+            "IssueDate": parse_date_for_creatio(info_extraida.get('fecha_emision', ''), nullable=False),
+            "ReceivedDate": parse_date_for_creatio(info_extraida.get('fecha_recibido', ''), nullable=False),
             
             # Cliente y expediente
-            "ClientTarget": info_extraida.get('oficiado_cliente', ''),
-            "ClientIdentification": info_extraida.get('numero_identificacion', ''),
-            "ExpedientNumber": info_extraida.get('expediente', ''),
+            "ClientTarget": ensure_non_empty_string(info_extraida.get('oficiado_cliente', '')),
+            "ClientIdentification": ensure_non_empty_string(info_extraida.get('numero_identificacion', '')),
+            "ExpedientNumber": ensure_non_empty_string(info_extraida.get('expediente', '')),
             
             # Información legal
-            "AutoNumber": info_extraida.get('numero_auto', ''),
+            "AutoNumber": ensure_non_empty_string(info_extraida.get('numero_auto', '')),
             "AutoDate": parse_date_for_creatio(info_extraida.get('fecha_auto', '')),
             "Amount": parse_amount_for_creatio(info_extraida.get('monto', '')),
-            "ResolutionNumber": info_extraida.get('numero_resolucion', ''),
-            "ResolutionDate": parse_date_for_creatio(info_extraida.get('fecha_resolucion', '')),
-            "Crime": info_extraida.get('delito', ''),
+            "ResolutionNumber": ensure_non_empty_string(info_extraida.get('numero_resolucion', '')),
+            "ResolutionDate": parse_date_for_creatio(info_extraida.get('fecha_resolucion', ''), nullable=False),
+            "Crime": ensure_non_empty_string(info_extraida.get('delito', '')),
             
             # Ubicación y control
-            "BranchReceived": info_extraida.get('sucursal_recibido', ''),
-            "Folder": info_extraida.get('carpeta', ''),
-            "DueDate": parse_date_for_creatio(info_extraida.get('vencimiento', '')),
-            "ReceivedStamp": info_extraida.get('sello_recibido', ''),
-            "AuthorityStamp": info_extraida.get('sello_autoridad', ''),
+            "BranchReceived": ensure_non_empty_string(info_extraida.get('sucursal_recibido', '')),
+            "Folder": ensure_non_empty_string(info_extraida.get('carpeta', '')),
+            "DueDate": parse_date_for_creatio(info_extraida.get('vencimiento', ''), nullable=False),
+            "ReceivedStamp": ensure_non_empty_string(info_extraida.get('sello_recibido', '')),
+            "AuthorityStamp": ensure_non_empty_string(info_extraida.get('sello_autoridad', '')),
             
             # Nuevos campos
-            "ProductType": info_extraida.get('tipo_producto', ''),
-            "Complainant": info_extraida.get('denuciante', ''),
-            "DirectedToGlobalBank": info_extraida.get('dirigido_global_bank', ''),
+            "ProductType": ensure_non_empty_string(info_extraida.get('tipo_producto', '')),
+            "Complainant": ensure_non_empty_string(info_extraida.get('denuciante', '')),
+            "DirectedToGlobalBank": ensure_non_empty_string(info_extraida.get('dirigido_global_bank', '')),
             
             # Clasificación automática
-            "DocumentClassification": ocr_data.get('tipo_oficio_detectado', ''),
-            "ConfidenceLevel": ocr_data.get('nivel_confianza', ''),
-            "KeywordsFound": ', '.join(ocr_data.get('palabras_clave_encontradas', [])),
+            "DocumentClassification": ensure_non_empty_string(ocr_data.get('tipo_oficio_detectado', '')),
+            "ConfidenceLevel": ensure_non_empty_string(ocr_data.get('nivel_confianza', '')),
+            "KeywordsFound": ', '.join(ocr_data.get('palabras_clave_encontradas', [])) or "Ninguna",
             
             # Metadatos
             "ProcessedAt": datetime.utcnow().isoformat(),
             "ProcessingSource": "Automated OCR",
-            "FullText": ocr_data.get('texto_completo', '')[:4000],  # Limitar texto
-            "Observations": ocr_data.get('observaciones', ''),
+            "FullText": ocr_data.get('texto_completo', '')[:4000] or "Sin texto",
+            "Observations": ensure_non_empty_string(ocr_data.get('observaciones', '')),
             
             # Estado y prioridad
             "Status": "Pending Review",
@@ -210,8 +233,10 @@ def map_ocr_data_to_creatio(ocr_data: Dict[str, Any], job_id: str, batch_id: str
             
             # Estadísticas
             "PersonsCount": len(personas),
-            "TotalAmount": ocr_data.get('lista_personas', {}).get('monto_total', 0),
-            "ExtractionQuality": ocr_data.get('analisis_extraccion', {}).get('resumen', {}).get('calidad_extraccion', 'UNKNOWN')
+            "TotalAmount": monto_total,
+            "ExtractionQuality": ensure_non_empty_string(
+                ocr_data.get('analisis_extraccion', {}).get('resumen', {}).get('calidad_extraccion', 'UNKNOWN')
+            )
         }
         
         # Agregar personas involucradas
@@ -230,20 +255,55 @@ def map_ocr_data_to_creatio(ocr_data: Dict[str, Any], job_id: str, batch_id: str
         logger.error(f"❌ Error mapeando datos: {str(e)}")
         raise
 
-def parse_date_for_creatio(date_str: str) -> Optional[str]:
+def parse_date_for_creatio(date_str: str, nullable: bool = True) -> str:
     """
     Convierte fecha a formato ISO para Creatio
+    Args:
+        date_str: String de fecha a parsear
+        nullable: Si es True, retorna None para fechas inválidas. Si es False, retorna fecha por defecto.
     """
-    if not date_str or date_str in ['No especificado', '', 'null']:
-        return None
+    if not date_str or date_str in ['No especificado', 'No especificada', '', 'null', None]:
+        if nullable:
+            return None
+        else:
+            # Para campos requeridos, usar fecha por defecto válida
+            return "1900-01-01"
     
     try:
         # Patrones de fecha comunes en Panamá
         import re
         from datetime import datetime
         
-        # Limpiar fecha
+        # Limpiar fecha - manejar texto como "14 de mayo de 2025"
+        date_clean = date_str.strip()
+        
+        # Intentar parsear fechas en español
+        if " de " in date_clean.lower():
+            try:
+                # Mapeo de meses en español
+                meses = {
+                    'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',
+                    'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',
+                    'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'
+                }
+                
+                # Extraer día, mes y año
+                parts = date_clean.lower().split()
+                if len(parts) >= 4 and parts[1] == 'de' and parts[3] == 'de':
+                    dia = parts[0].zfill(2)
+                    mes = meses.get(parts[2], None)
+                    año = parts[4]
+                    
+                    if mes and año.isdigit():
+                        return f"{año}-{mes}-{dia}"
+            except:
+                pass
+        
+        # Limpiar fecha para formatos numéricos
         date_clean = re.sub(r'[^\d\/\-\.]', '', date_str)
+        
+        if not date_clean:
+            return "1900-01-01" if not nullable else None
         
         # Intentar diferentes formatos
         formats = [
@@ -252,7 +312,9 @@ def parse_date_for_creatio(date_str: str) -> Optional[str]:
             '%d.%m.%Y',
             '%Y-%m-%d',
             '%d/%m/%y',
-            '%d-%m-%y'
+            '%d-%m-%y',
+            '%m/%d/%Y',
+            '%Y/%m/%d'
         ]
         
         for fmt in formats:
@@ -263,11 +325,11 @@ def parse_date_for_creatio(date_str: str) -> Optional[str]:
                 continue
         
         logger.warning(f"⚠️ No se pudo parsear fecha: {date_str}")
-        return None
+        return "1900-01-01" if not nullable else None
         
     except Exception as e:
         logger.warning(f"⚠️ Error parseando fecha {date_str}: {str(e)}")
-        return None
+        return "1900-01-01" if not nullable else None
 
 def parse_amount_for_creatio(amount_str: str) -> float:
     """
@@ -341,8 +403,11 @@ def format_persons_for_creatio(personas: List[Dict[str, Any]]) -> List[Dict[str,
     formatted_persons = []
     
     for persona in personas:
-        # Separar nombre completo en partes
+        # Manejar diferentes estructuras de nombre
         nombre_completo = persona.get('nombre_completo', '')
+        if not nombre_completo:
+            nombre_completo = persona.get('nombre', '')
+        
         nombres = nombre_completo.split()
         
         nombre = nombres[0] if nombres else ''
@@ -350,13 +415,23 @@ def format_persons_for_creatio(personas: List[Dict[str, Any]]) -> List[Dict[str,
         apellido_materno = nombres[2] if len(nombres) > 2 else ''
         nombre_segundo = nombres[3] if len(nombres) > 3 else ''
         
+        # Manejar diferentes estructuras de monto
+        monto_numerico = persona.get('monto_numerico', 0.0)
+        if monto_numerico == 0.0:
+            monto_str = persona.get('monto', '0')
+            if monto_str and monto_str != 'No especificado':
+                try:
+                    monto_numerico = parse_amount_for_creatio(monto_str)
+                except:
+                    monto_numerico = 0.0
+        
         formatted_person = {
             "nombre": nombre,
             "apellido_paterno": apellido_paterno,
             "apellido_materno": apellido_materno,
             "nombre_segundo": nombre_segundo,
             "identificacion": persona.get('identificacion', ''),
-            "monto_numerico": persona.get('monto_numerico', 0.0),
+            "monto_numerico": monto_numerico,
             "expediente": persona.get('expediente', ''),
             "observaciones": f"Persona extraída por OCR - Secuencia: {persona.get('secuencia', 0)}"
         }
@@ -372,7 +447,7 @@ def format_autos_for_creatio(autos: List[Dict[str, Any]]) -> List[Dict[str, Any]
     
     for auto in autos:
         formatted_auto = {
-            "AutoDate": parse_date_for_creatio(auto.get('fecha_auto', '')),
+            "AutoDate": parse_date_for_creatio(auto.get('fecha_auto', ''), nullable=False),
             "AutoNumber": auto.get('numero_auto_placa', ''),
             "Amount": parse_amount_for_creatio(auto.get('monto_auto', ''))
         }
@@ -433,7 +508,7 @@ class CreatioService:
             "Cookie": cookie_header
         }
     
-    def create_case(self, subject, notes, priority_id="d9bd322c-f46b-1410-ee8c-0050ba5d6c38"):
+    def create_case(self, subject, notes, priority_id="d9bd322c-f46b-1410-ee8c-0050ba5d6c38", case_data_extra=None):
         """Crea un caso en Creatio"""
         logger.info("📋 Creando caso en Creatio...")
         
@@ -447,8 +522,8 @@ class CreatioService:
             "ModifiedById": "410006e1-ca4e-4502-a9ec-e54d922d2c00",
             "ProcessListeners": 2,
             "RegisteredOn": datetime.utcnow().isoformat() + "Z",
-            "Subject": subject,
-            "Symptoms": subject,
+            "Subject": "Caso, tipo Oficio",
+            "Symptoms": "Caso, tipo Oficio",
             "StatusId": "ae5f2f10-f46b-1410-fd9a-0050ba5d6c38",
             "Notes": notes,
             "PriorityId": priority_id,
@@ -461,6 +536,10 @@ class CreatioService:
             "SupportLevelId": "ff7f2f92-f36b-1410-3d9c-0050ba5d6c38",
             "FirstSolutionProvidedOn": "0001-01-01T00:00:00Z"
         }
+        
+        # Agregar campos adicionales si se proporcionan
+        if case_data_extra:
+            case_data.update(case_data_extra)
         
         try:
             data = json.dumps(case_data).encode("utf-8")
@@ -491,6 +570,9 @@ class CreatioService:
         
         url = f"{self.url}/0/odata/NdosPersonasOCR"
         
+        # Construir nombre completo
+        nombre_completo = f"{person_data.get('nombre', '')} {person_data.get('apellido_paterno', '')} {person_data.get('apellido_materno', '')} {person_data.get('nombre_segundo', '')}".strip()
+        
         # Mapear datos de la persona
         persona_record = {
             "CreatedOn": datetime.utcnow().isoformat() + "Z",
@@ -501,10 +583,11 @@ class CreatioService:
             "NdosObservaciones": person_data.get('observaciones', ''),
             "NdosImporte": person_data.get('monto_numerico', 0.0),
             "NdosIdentificacionNumero": person_data.get('identificacion', ''),
-            "NdosApellidoMaterno": person_data.get('apellido_materno', ''),
-            "NdosApellidoPaterno": person_data.get('apellido_paterno', ''),
-            "NdosNombreSegundo": person_data.get('nombre_segundo', ''),
-            "NdosNombre": person_data.get('nombre', ''),
+            "NdosApellidoMaterno": '',
+            "NdosApellidoPaterno": '',
+            "NdosNombreSegundo": '',
+            "NdosNombre": '',
+            "NdosNombreCompleto": nombre_completo,
             "NdosExpediente": person_data.get('expediente', ''),
             "NdosOficioId": case_id
         }
@@ -545,11 +628,44 @@ def create_creatio_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         # Autenticar
         creatio.authenticate()
         
+        # Función auxiliar para asegurar string no vacío para Creatio
+        def ensure_creatio_string(value, default="No especificado"):
+            if not value or str(value).strip() in ['', 'null', 'None']:
+                return default
+            return str(value).strip()
+        
+        # Preparar datos adicionales del caso con validación estricta
+        case_data_extra = {
+            "NdosSensitivo": bool(payload.get('RequiresUrgentAction', False)),
+            "NdosDirigidoaGlobalBank": str(payload.get('DirectedToGlobalBank', '')).lower() in ['true', 'si', 'yes', '1'],
+            "NdosSellodeAutoridad": bool(payload.get('AuthorityStamp', '').strip()),
+            "NdosDelito": ensure_creatio_string(payload.get('Crime', '')),
+            "NdosFechadeResolucion": ensure_creatio_string(payload.get('ResolutionDate', ''), "1900-01-01"),
+            "NdosNdeResolucion": ensure_creatio_string(payload.get('ResolutionNumber', '')),
+            "NdosVencimiento": ensure_creatio_string(payload.get('DueDate', ''), "1900-01-01"),
+            "NdosCarpeta": ensure_creatio_string(payload.get('Folder', '')),
+            "NdosSucursaldeRecibido": ensure_creatio_string(payload.get('BranchReceived', '')),
+            "NdosMonto": float(payload.get('Amount', 0)),
+            "NdosFechadeRecibido": ensure_creatio_string(payload.get('ReceivedDate', ''), "1900-01-01"),
+            "NdosFechadeEmision": ensure_creatio_string(payload.get('IssueDate', ''), "1900-01-01"),
+            "NdosAutoridad": ensure_creatio_string(payload.get('Authority', '')),
+            "NdosClasificaciondeOficio": ensure_creatio_string(payload.get('DocumentClassification', '')),
+            "NdosNoficio": ensure_creatio_string(payload.get('OficioNumber', '')),
+            "NdosPalabrasClaves": ensure_creatio_string(payload.get('KeywordsFound', ''), "Ninguna"),
+            "NdosObservaciones": ensure_creatio_string(payload.get('Observations', ''))
+        }
+        
+        # Log de validación
+        logger.info(f"🔍 Datos para Creatio validados:")
+        for key, value in case_data_extra.items():
+            if key.startswith('NdosFecha') or key in ['NdosVencimiento']:
+                logger.info(f"  {key}: {value} (type: {type(value)})")
+        
         # Crear caso
-        subject = f"Oficio: {payload.get('OficioNumber', 'Sin número')} - {payload.get('Authority', 'Sin autoridad')}"
+        subject = f"Oficio: {ensure_creatio_string(payload.get('OficioNumber', 'Sin número'))} - {ensure_creatio_string(payload.get('Authority', 'Sin autoridad'))}"
         notes = f"Oficio procesado automáticamente por OCR\nCliente: {payload.get('ClientTarget', 'No especificado')}\nMonto: {payload.get('Amount', 0)}"
         
-        case_id = creatio.create_case(subject, notes)
+        case_id = creatio.create_case(subject, notes, case_data_extra=case_data_extra)
         
         # Crear registros de personas si existen
         personas = payload.get('InvolvedPersons', [])
@@ -560,13 +676,13 @@ def create_creatio_request(payload: Dict[str, Any]) -> Dict[str, Any]:
                 person_id = creatio.create_person_record(case_id, persona)
                 created_persons.append({
                     'person_id': person_id,
-                    'name': persona.get('FullName', 'Sin nombre')
+                    'name': persona.get('nombre', 'Sin nombre')
                 })
             except Exception as e:
-                logger.error(f"❌ Error creando persona {persona.get('FullName', 'Sin nombre')}: {str(e)}")
+                logger.error(f"❌ Error creando persona {persona.get('nombre', 'Sin nombre')}: {str(e)}")
                 created_persons.append({
                     'error': str(e),
-                    'name': persona.get('FullName', 'Sin nombre')
+                    'name': persona.get('nombre', 'Sin nombre')
                 })
         
         logger.info(f"✅ Integración completada: Caso {case_id} con {len(created_persons)} personas")

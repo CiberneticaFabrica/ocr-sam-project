@@ -143,3 +143,4 @@ def save_failed_notification(recipient: str, subject: str, body: str, error: str
         
     except Exception as e:
         logger.error(f"❌ Error guardando notificación fallida: {str(e)}")
+

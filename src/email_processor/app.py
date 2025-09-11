@@ -27,7 +27,7 @@ dynamodb = boto3.resource('dynamodb')
 S3_BUCKET_NAME = os.environ['S3_BUCKET_NAME']
 OCR_QUEUE_URL = os.environ['OCR_QUEUE_URL']
 TRACKING_TABLE = os.environ['TRACKING_TABLE']
-SES_FROM_EMAIL = os.environ.get('SES_FROM_EMAIL', 'notify@softwarefactory.cibernetica.xyz')
+SES_FROM_EMAIL = os.environ.get('SES_FROM_EMAIL', 'edwin.penalba@cibernetica.net')
 
 def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """
@@ -61,11 +61,12 @@ def process_s3_email_event(record: Dict[str, Any]):
         bucket = record['s3']['bucket']['name']
         key = record['s3']['object']['key']
         
-        logger.info(f"📧 Procesando email: s3://{bucket}/{key}")
+        logger.info(f"📧 [EMAIL-PROCESSOR] Procesando evento S3: s3://{bucket}/{key}")
+        logger.info(f"📧 [EMAIL-PROCESSOR] Event record completo: {record}")
         
         # Verificar que es un email de SES
         if not key.startswith('emails/'):
-            logger.info("❌ Archivo no es email de SES, ignorando")
+            logger.info(f"❌ [EMAIL-PROCESSOR] Archivo no es email de SES, ignorando. Key: {key}")
             return
         
         # Descargar y parsear el email completo
@@ -1465,7 +1466,7 @@ def send_html_email_notification(recipient: str, subject: str, html_body: str, t
     """
     try:
         # Verificar configuración SES
-        if not SES_FROM_EMAIL or SES_FROM_EMAIL == 'notify@softwarefactory.cibernetica.xyz':
+        if not SES_FROM_EMAIL:
             logger.warning("⚠️ SES_FROM_EMAIL no está configurado correctamente")
             raise Exception("SES_FROM_EMAIL not properly configured")
         

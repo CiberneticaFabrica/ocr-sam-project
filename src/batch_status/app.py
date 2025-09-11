@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from typing import Dict, Any, List
 from boto3.dynamodb.conditions import Key
+from decimal import Decimal
 
 # Configuración de logging
 logger = logging.getLogger()
@@ -50,7 +51,7 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 'Access-Control-Allow-Methods': 'GET, OPTIONS',
                 'Access-Control-Allow-Headers': 'Content-Type, Authorization'
             },
-            'body': json.dumps(batch_info, ensure_ascii=False)
+            'body': json.dumps(convert_decimals(batch_info), ensure_ascii=False)
         }
         
     except Exception as e:
@@ -395,6 +396,23 @@ def create_cors_response():
         },
         'body': json.dumps({'message': 'CORS preflight OK'})
     }
+
+def convert_decimals(obj):
+    """
+    Convierte objetos Decimal a tipos nativos de Python para serialización JSON
+    """
+    if isinstance(obj, Decimal):
+        # Si es un número entero, convertir a int, sino a float
+        if obj % 1 == 0:
+            return int(obj)
+        else:
+            return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimals(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals(item) for item in obj]
+    else:
+        return obj
 
 def create_error_response(status_code: int, error_message: str) -> Dict[str, Any]:
     """

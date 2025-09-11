@@ -34,7 +34,7 @@ Parameters:
   CreatioPassword:
     Type: String
     NoEcho: true
-    Default: !k*ZPCT&MkuF2cDiM!S
+    Default: "your-creatio-password-here"
     Description: Creatio CRM password
     
   EnableDynamoDB:
@@ -45,7 +45,7 @@ Parameters:
 
   SESFromEmail:
     Type: String
-    Default: "notify@softwarefactory.cibernetica.xyz"
+    Default: "edwin.penalba@cibernetica.net"
     Description: Email address for sending notifications
     
   SESReceiveEmail:
@@ -386,11 +386,54 @@ Resources:
   # =====================================
   # EMAIL PROCESSOR FUNCTION
   # =====================================
-  EmailProcessorFunction:
+  # EmailProcessorFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     FunctionName: !Sub "${AWS::StackName}-email-processor"
+  #     CodeUri: src/email_processor/
+  #     Handler: app.lambda_handler
+  #     MemorySize: 2048
+  #     Timeout: 600
+  #     Environment:
+  #       Variables:
+  #         OCR_QUEUE_URL: !Ref ProcessingQueue
+  #         TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
+  #     Policies:
+  #       - S3FullAccessPolicy:
+  #           BucketName: !Ref S3BucketName
+  #       - SQSSendMessagePolicy:
+  #           QueueName: !GetAtt ProcessingQueue.QueueName
+  #       - !If
+  #         - EnableDynamoDBCondition
+  #         - DynamoDBCrudPolicy:
+  #             TableName: !Ref TrackingTable
+  #         - !Ref AWS::NoValue
+  #       - Statement:
+  #         - Effect: Allow
+  #           Action:
+  #             - ses:SendEmail
+  #             - ses:SendRawEmail
+  #           Resource: "*"
+  #     Events:
+  #       S3EmailEvent:
+  #         Type: S3
+  #         Properties:
+  #           Bucket: !Ref DocumentBucket
+  #           Events: s3:ObjectCreated:*
+  #           Filter:
+  #             S3Key:
+  #               Rules:
+  #                 - Name: prefix
+  #                   Value: emails/
+
+  # =====================================
+  # S3 DOCUMENT PROCESSOR FUNCTION
+  # =====================================
+  S3DocumentProcessorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-email-processor"
-      CodeUri: src/email_processor/
+      FunctionName: !Sub "${AWS::StackName}-s3-document-processor"
+      CodeUri: src/s3_document_processor/
       Handler: app.lambda_handler
       MemorySize: 2048
       Timeout: 600
@@ -398,6 +441,8 @@ Resources:
         Variables:
           OCR_QUEUE_URL: !Ref ProcessingQueue
           TRACKING_TABLE: !If [EnableDynamoDBCondition, !Ref TrackingTable, ""]
+          SESFromEmail: !Ref SESFromEmail
+          SESReceiveEmail: !Ref SESReceiveEmail
       Policies:
         - S3FullAccessPolicy:
             BucketName: !Ref S3BucketName
@@ -415,7 +460,7 @@ Resources:
               - ses:SendRawEmail
             Resource: "*"
       Events:
-        S3EmailEvent:
+        S3DocumentEvent:
           Type: S3
           Properties:
             Bucket: !Ref DocumentBucket
@@ -424,7 +469,7 @@ Resources:
               S3Key:
                 Rules:
                   - Name: prefix
-                    Value: emails/
+                    Value: incoming/
 
   # =====================================
   # CRM INTEGRATOR FUNCTION
@@ -517,6 +562,7 @@ Resources:
           Properties:
             Topic: !Ref EmailNotificationTopic
 
+
 # =====================================
 # OUTPUTS
 # =====================================
@@ -536,6 +582,8 @@ Outputs:
   BatchStatusEndpoint:
     Description: Endpoint para consultar estado de lotes
     Value: !Sub "https://${OcrApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/batch/status/{batch_id}"
+
+
 
   S3BucketName:
     Description: Nombre del bucket S3

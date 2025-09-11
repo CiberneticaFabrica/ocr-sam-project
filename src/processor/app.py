@@ -85,8 +85,8 @@ def process_sqs_messages(records: list, context) -> Dict[str, Any]:
             logger.info(f"🔄 Procesando job desde SQS: {job_id}")
             
             # Determinar tipo de procesamiento
-            if 'oficio_data' in message_body:
-                # Nuevo flujo: procesamiento de oficio individual del lote
+            if 'oficio_data' in message_body or 's3_key' in message_body:
+                # Nuevo flujo: procesamiento de oficio individual del lote (email o S3 directo)
                 result = process_batch_oficio_job(message_body, context)
             else:
                 # Flujo existente: job individual
@@ -116,20 +116,27 @@ def process_sqs_messages(records: list, context) -> Dict[str, Any]:
 
 def process_batch_oficio_job(message_data: Dict[str, Any], context) -> Dict[str, Any]:
     """
-    Procesa un oficio individual del lote de email
+    Procesa un oficio individual del lote (email o S3 directo)
     """
     try:
         job_id = message_data['job_id']
         batch_id = message_data['batch_id']
-        oficio_data = message_data['oficio_data']
+        source = message_data.get('source', 'email')  # 'email' o 's3_direct'
         
-        logger.info(f"📄 Procesando oficio del lote: {job_id} (batch: {batch_id})")
+        logger.info(f"📄 Procesando oficio del lote: {job_id} (batch: {batch_id}, source: {source})")
         
         # Actualizar estado en DynamoDB
         update_oficio_status(batch_id, job_id, 'processing', 'OCR iniciado')
         
         # Obtener PDF del oficio desde S3
-        s3_key = oficio_data['s3_key']
+        if source == 's3_direct':
+            # Para documentos S3 directo, usar s3_key del mensaje
+            s3_key = message_data['s3_key']
+        else:
+            # Para documentos de email, usar oficio_data
+            oficio_data = message_data.get('oficio_data', {})
+            s3_key = oficio_data['s3_key']
+        
         pdf_content = get_pdf_from_s3(s3_key)
         
         # Preparar datos para OCR
