@@ -70,9 +70,15 @@ class OCRService:
             # Calculate confidence based on text quality
             confidence = self._calculate_text_confidence(full_text)
             
+            # Store page count before closing
+            total_pages = pdf_doc.page_count
+            
+            # Close document
+            pdf_doc.close()
+            
             # Prepare metadata
             metadata = {
-                'total_pages': pdf_doc.page_count if 'pdf_doc' in locals() else len(page_texts),
+                'total_pages': total_pages,
                 'total_chars': len(full_text),
                 'pages_with_text': len(page_texts),
                 'average_chars_per_page': len(full_text) / len(page_texts) if page_texts else 0,

@@ -33,9 +33,9 @@ class PDFService:
             raise PDFProcessingError(f"Failed to download PDF: {str(e)}")
     
     def split_into_oficios(self, pdf_content: bytes, batch_id: str, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Split PDF into individual oficios"""
+        """Split PDF into individual oficios by detecting separators"""
         try:
-            logger.info("✂️ Starting PDF split into oficios")
+            logger.info("✂️ Starting PDF split into oficios by separators")
             
             # Open PDF document
             pdf_doc = fitz.open(stream=pdf_content, filetype="pdf")
@@ -43,19 +43,22 @@ class PDFService:
             # Skip first page if it contains metadata/config
             start_page = 1 if self._has_config_page(pdf_doc) else 0
             
-            oficios = []
-            oficios_per_page = metadata.get('oficios_per_page', 1)
+            # Find separator pages
+            separator_pages = self._find_separator_pages(pdf_doc, start_page)
+            logger.info(f"🔍 Found {len(separator_pages)} separator pages: {separator_pages}")
             
-            # Split by pages (configurable oficios per page)
-            current_page = start_page
+            oficios = []
             oficio_number = 1
             
-            while current_page < pdf_doc.page_count:
-                end_page = min(current_page + oficios_per_page, pdf_doc.page_count)
-                
-                # Create individual oficio
+            # Split by separators
+            current_page = start_page
+            for separator_page in separator_pages + [pdf_doc.page_count]:
+                if current_page >= separator_page:
+                    continue
+                    
+                # Create individual oficio from current_page to separator_page-1
                 oficio_doc = fitz.open()
-                for page_num in range(current_page, end_page):
+                for page_num in range(current_page, separator_page):
                     oficio_doc.insert_pdf(pdf_doc, from_page=page_num, to_page=page_num)
                 
                 # Generate oficio data
@@ -63,8 +66,8 @@ class PDFService:
                     'oficio_id': f"{batch_id}_oficio_{oficio_number:03d}",
                     'batch_id': batch_id,
                     'oficio_number': oficio_number,
-                    'page_range': [current_page, end_page - 1],
-                    'total_pages': end_page - current_page,
+                    'page_range': [current_page, separator_page - 1],
+                    'total_pages': separator_page - current_page,
                     'pdf_content': oficio_doc.write(),
                     'created_at': datetime.utcnow().isoformat()
                 }
@@ -72,7 +75,7 @@ class PDFService:
                 oficios.append(oficio_data)
                 oficio_doc.close()
                 
-                current_page = end_page
+                current_page = separator_page
                 oficio_number += 1
             
             pdf_doc.close()
@@ -82,6 +85,41 @@ class PDFService:
             
         except Exception as e:
             raise PDFProcessingError(f"Failed to split PDF: {str(e)}")
+    
+    def _find_separator_pages(self, pdf_doc, start_page: int) -> List[int]:
+        """Find pages that contain separator text (not actual oficios)"""
+        try:
+            separator_pages = []
+            
+            for page_num in range(start_page, pdf_doc.page_count):
+                page = pdf_doc[page_num]
+                text = page.get_text().strip().lower()
+                
+                # Check if this page is a separator (contains separator keywords)
+                separator_keywords = [
+                    'separador',
+                    'separator', 
+                    'oficio',
+                    'oficio número',
+                    'oficio no',
+                    'oficio #',
+                    'cantidad_oficios',
+                    'empresa',
+                    'configuración',
+                    'lote',
+                    'batch'
+                ]
+                
+                # If page contains separator keywords and is short (likely just a separator)
+                if any(keyword in text for keyword in separator_keywords) and len(text) < 200:
+                    separator_pages.append(page_num)
+                    logger.info(f"🔍 Found separator page {page_num}: {text[:100]}...")
+            
+            return separator_pages
+            
+        except Exception as e:
+            logger.error(f"❌ Error finding separator pages: {str(e)}")
+            return []
     
     def _has_config_page(self, pdf_doc) -> bool:
         """Check if first page contains configuration data"""
