@@ -68,12 +68,25 @@ Resources:
   # ================================
   # S3 BUCKET
   # ================================
-  # Note: Using existing S3 bucket - not creating new one
-  # The bucket 'ocr-legal-documents-dev' already exists
+  # S3 Bucket (import existing bucket)
+  DocumentStorage:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref S3BucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt DocumentProcessorFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: incoming/
+                  - Name: suffix
+                    Value: .pdf
 
-  # ================================
-  # S3 PERMISSIONS FOR EXISTING BUCKET
-  # ================================
+  # S3 Permission for Lambda
   S3InvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -258,7 +271,7 @@ Resources:
         S3Event:
           Type: S3
           Properties:
-            Bucket: !Ref S3BucketName
+            Bucket: !Ref DocumentStorage
             Events: s3:ObjectCreated:*
             Filter:
               S3Key:
@@ -508,7 +521,7 @@ Outputs:
   # S3 Bucket
   S3BucketName:
     Description: S3 bucket for document storage
-    Value: !Ref S3BucketName
+    Value: !Ref DocumentStorage
     Export:
       Name: !Sub "${AWS::StackName}-S3Bucket"
   
