@@ -1,0 +1,27 @@
+{
+  "palabras_clave_encontradas": [],
+  "tipo_oficio_detectado": "Otros",
+  "nivel_confianza": "bajo",
+  "ocr_metadata": {
+    "total_pages": 2,
+    "total_chars": 68,
+    "pages_with_text": 1,
+    "average_chars_per_page": 68.0,
+    "confidence": 0.15681176470588237,
+    "extraction_method": "pymupdf",
+    "page_details": [
+      {
+        "page_number": 1,
+        "text": "=====================\nSEPARADOR DE OFICIOS \n=====================",
+        "char_count": 65
+      }
+    ]
+  },
+  "processed_at": "2025-09-19T20:01:07.147017",
+  "informacion_extraida": {
+    "personas": []
+  },
+  "job_id": "batch_20250919_200101_2b1fc5f7_oficio_001",
+  "saved_at": "2025-09-19T20:01:07.147218",
+  "version": "2.0"
+}

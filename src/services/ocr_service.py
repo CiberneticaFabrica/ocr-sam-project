@@ -43,6 +43,9 @@ class OCRService:
                 page = pdf_doc[page_num]
                 page_text = page.get_text()
                 
+                logger.info(f"📄 Page {page_num + 1}: {len(page_text.strip())} chars")
+                logger.info(f"📄 Page {page_num + 1} preview: {page_text.strip()[:100]}...")
+                
                 if page_text.strip():
                     full_text += page_text + "\n\n"
                     page_texts.append({
@@ -52,6 +55,9 @@ class OCRService:
                     })
             
             pdf_doc.close()
+            
+            logger.info(f"📄 Total extracted text: {len(full_text)} chars from {len(page_texts)} pages")
+            logger.info(f"📄 Full text preview: {full_text[:500]}...")
             
             # Validate extracted text
             if len(full_text.strip()) < self.min_text_length:

@@ -37,8 +37,13 @@ class MistralService:
             start_time = datetime.now()
             logger.info(f"🤖 Starting Mistral AI analysis for job {job_id}")
             
+            # Log input text for debugging
+            logger.info(f"📝 Input text for analysis: {len(text)} chars")
+            logger.info(f"📄 Text preview: {text[:300]}...")
+            
             # Prepare prompt
             prompt = self._create_analysis_prompt(text)
+            logger.info(f"📋 Prompt created: {len(prompt)} chars")
             
             # Make API request
             response = self._make_api_request(prompt)
@@ -46,8 +51,15 @@ class MistralService:
             if not response:
                 return MistralResult(False, error="No response from Mistral API")
             
+            # Log raw response for debugging
+            logger.info(f"🤖 Raw Mistral response: {len(response)} chars")
+            logger.info(f"📄 Response preview: {response[:500]}...")
+            
             # Parse response
             parsed_data = self._parse_mistral_response(response)
+            
+            # Log parsed data for debugging
+            logger.info(f"📊 Parsed data: tipo={parsed_data.get('tipo_oficio_detectado')}, palabras={len(parsed_data.get('palabras_clave_encontradas', []))}, personas={len(parsed_data.get('informacion_extraida', {}).get('personas', []))}")
             
             processing_time = (datetime.now() - start_time).total_seconds()
             

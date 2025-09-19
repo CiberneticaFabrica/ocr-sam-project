@@ -118,9 +118,23 @@ def process_batch_oficio(message_data: Dict[str, Any], context) -> Dict[str, Any
         pdf_content = storage_service.download_oficio_pdf(oficio_data)
         
         # Step 2: Extract text using OCR
+        Logger.log_processing_step(logger, f"Starting OCR extraction", {
+            'job_id': job_id,
+            'pdf_size_bytes': len(pdf_content)
+        })
+        
         ocr_result = ocr_service.extract_text_from_pdf(pdf_content)
         if not ocr_result.success:
             raise OCRBaseException(f"OCR failed: {ocr_result.error}")
+        
+        # Log OCR results for debugging
+        Logger.log_processing_step(logger, f"OCR extraction completed", {
+            'job_id': job_id,
+            'text_length': len(ocr_result.text),
+            'confidence': ocr_result.metadata.get('confidence', 'N/A'),
+            'total_pages': ocr_result.metadata.get('total_pages', 'N/A'),
+            'text_preview': ocr_result.text[:200] + '...' if len(ocr_result.text) > 200 else ocr_result.text
+        })
         
         # Step 3: Process with Mistral AI
         ai_result = mistral_service.analyze_oficio_text(ocr_result.text, job_id)
