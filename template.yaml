@@ -110,7 +110,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "${AWS::StackName}-ocr-processing"
-      VisibilityTimeoutSeconds: 960  # 16 minutes (longer than Lambda timeout)
+      VisibilityTimeout: 960  # 16 minutes (longer than Lambda timeout)
       MessageRetentionPeriod: 1209600  # 14 days
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt OCRDeadLetterQueue.Arn
@@ -138,7 +138,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "${AWS::StackName}-crm-integration"
-      VisibilityTimeoutSeconds: 320  # 5+ minutes
+      VisibilityTimeout: 360  # 6 minutes (longer than Lambda timeout)
       MessageRetentionPeriod: 1209600  # 14 days
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt CRMDeadLetterQueue.Arn
