@@ -9,7 +9,7 @@ Globals:
   Function:
     Timeout: 900
     MemorySize: 1024
-    Runtime: python3.11
+    Runtime: python3.9
     Environment:
       Variables:
         ENVIRONMENT: !Ref Environment
@@ -86,8 +86,9 @@ Resources:
             NoncurrentVersionExpirationInDays: 30
           - Id: MoveToIA
             Status: Enabled
-            TransitionInDays: 30
-            StorageClass: STANDARD_IA
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
       NotificationConfiguration:
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*

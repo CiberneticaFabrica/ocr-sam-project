@@ -1,4 +1,3 @@
 # src/status/requirements.txt
-boto3>=1.26.0
-botocore>=1.29.0
+boto3
 
