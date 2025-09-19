@@ -66,26 +66,10 @@ Conditions:
 Resources:
   
   # ================================
-  # S3 BUCKET
+  # S3 BUCKET (using existing bucket)
   # ================================
-  # S3 Bucket (import existing bucket)
-  DocumentStorage:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    Properties:
-      BucketName: !Ref S3BucketName
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: s3:ObjectCreated:*
-            Function: !GetAtt DocumentProcessorFunction.Arn
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: incoming/
-                  - Name: suffix
-                    Value: .pdf
-
+  # Note: S3 bucket already exists, we just need permissions and notifications
+  
   # S3 Permission for Lambda
   S3InvokePermission:
     Type: AWS::Lambda::Permission
@@ -271,7 +255,7 @@ Resources:
         S3Event:
           Type: S3
           Properties:
-            Bucket: !Ref DocumentStorage
+            Bucket: !Ref S3BucketName
             Events: s3:ObjectCreated:*
             Filter:
               S3Key:
@@ -521,7 +505,7 @@ Outputs:
   # S3 Bucket
   S3BucketName:
     Description: S3 bucket for document storage
-    Value: !Ref DocumentStorage
+    Value: !Ref S3BucketName
     Export:
       Name: !Sub "${AWS::StackName}-S3Bucket"
   
