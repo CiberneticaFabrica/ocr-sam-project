@@ -28,6 +28,11 @@ class TrackingService:
             }
             
             if message:
+                # Limitar longitud del mensaje para evitar ValidationException
+                # DynamoDB tiene límites en el tamaño de ExpressionAttributeValues
+                max_message_length = 1000  # Límite conservador
+                if len(message) > max_message_length:
+                    message = message[:max_message_length-3] + "..."
                 update_data['status_message'] = message
             
             if status == 'completed':
@@ -65,7 +70,15 @@ class TrackingService:
             logger.info(f"📊 Job {job_id} status updated: {status}")
             
         except Exception as e:
-            logger.error(f"❌ Failed to update job status: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"❌ Failed to update job status: {error_msg}")
+            
+            # Log additional details for debugging
+            if "ValidationException" in error_msg:
+                logger.error(f"🔍 Validation error details - Job: {job_id}, Status: {status}, Message length: {len(message) if message else 0}")
+            elif "ExpressionAttributeValues" in error_msg:
+                logger.error(f"🔍 ExpressionAttributeValues error - Job: {job_id}, Status: {status}")
+            
             # Don't raise exception to avoid breaking main flow
     
     def get_job_data(self, job_id: str) -> Optional[Dict[str, Any]]:

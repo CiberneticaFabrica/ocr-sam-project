@@ -1,6 +1,0 @@
-user.name=CiberneticaFabrica
-user.email=edwin.penalba@cibernetica.net
-filter.lfs.clean=git-lfs clean -- %f
-filter.lfs.smudge=git-lfs smudge -- %f
-filter.lfs.process=git-lfs filter-process
-filter.lfs.required=true

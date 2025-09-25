@@ -19,6 +19,8 @@ Globals:
         CREATIO_USERNAME: !Ref CreatioUsername
         CREATIO_PASSWORD: !Ref CreatioPassword
         LOG_LEVEL: INFO
+        # Enhanced OCR Configuration
+        LOG_LEVEL: INFO
 
 # Parameters
 Parameters:
@@ -30,7 +32,7 @@ Parameters:
   
   S3BucketName:
     Type: String
-    Default: ocr-legal-documents-dev
+    Default: ocr-legal-documents-v3-dev
     Description: S3 bucket for document storage
   
   MistralApiKey:
@@ -51,6 +53,7 @@ Parameters:
     NoEcho: true
     Description: Creatio password
   
+  
   EnableDynamoDB:
     Type: String
     Default: 'true'
@@ -66,18 +69,10 @@ Conditions:
 Resources:
   
   # ================================
-  # S3 BUCKET (using existing bucket)
+  # S3 BUCKET (Reference to existing bucket)
   # ================================
-  # Note: S3 bucket already exists, we just need permissions and notifications
-  
-  # S3 Permission for Lambda
-  S3InvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref DocumentProcessorFunction
-      Action: lambda:InvokeFunction
-      Principal: s3.amazonaws.com
-      SourceArn: !Sub "arn:aws:s3:::${S3BucketName}"
+  # Note: We're referencing an existing S3 bucket instead of creating a new one
+  # The bucket name is passed as a parameter and should already exist
 
   # ================================
   # SQS QUEUES
@@ -116,7 +111,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "${AWS::StackName}-crm-integration"
-      VisibilityTimeout: 360  # 6 minutes (longer than Lambda timeout)
+      VisibilityTimeout: 320  # 5+ minutes
       MessageRetentionPeriod: 1209600  # 14 days
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt CRMDeadLetterQueue.Arn
@@ -217,9 +212,9 @@ Resources:
   DocumentProcessorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-document-processor"
-      CodeUri: src/document_processor/
-      Handler: app.lambda_handler
+      FunctionName: !Sub "${AWS::StackName}-document-processing"
+      CodeUri: src/
+      Handler: document_processor.app.lambda_handler
       Description: Processes PDF documents from S3 and splits into oficios
       MemorySize: 2048
       Timeout: 600
@@ -251,32 +246,21 @@ Resources:
               - EnableDynamoDBCondition  
               - !Ref JobTrackingTable
               - !Ref AWS::NoValue
-      Events:
-        S3Event:
-          Type: S3
-          Properties:
-            Bucket: !Ref S3BucketName
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: incoming/
-                  - Name: suffix
-                    Value: .pdf
+      # Note: S3 events are configured manually on the existing bucket
 
-  # OCR Processor Function
+  # OCR Processor Function - Enhanced Mistral OCR
   OCRProcessorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-ocr-processor"
-      CodeUri: src/ocr_processor/
-      Handler: app.lambda_handler
-      Description: Processes individual oficios with OCR and AI
-      MemorySize: 3008
-      Timeout: 900
+      FunctionName: !Sub "${AWS::StackName}-ocr-processing"
+      CodeUri: src/
+      Handler: ocr_processor.app.lambda_handler
+      Description: Processes individual oficios with Enhanced Mistral AI OCR
+      MemorySize: 2048
+      Timeout: 600
       Environment:
         Variables:
+          OCR_QUEUE_URL: !Ref OCRProcessingQueue
           CRM_QUEUE_URL: !Ref CRMQueue
           BATCH_TRACKING_TABLE: !If
             - EnableDynamoDBCondition
@@ -295,16 +279,34 @@ Resources:
             QueueName: !GetAtt OCRProcessingQueue.QueueName
         - SQSSendMessagePolicy:
             QueueName: !GetAtt CRMQueue.QueueName
-        - DynamoDBWritePolicy:
+        # ✅ PERMISOS DYNAMODB COMPLETOS
+        - DynamoDBCrudPolicy:
             TableName: !If
               - EnableDynamoDBCondition
               - !Ref BatchTrackingTable
               - !Ref AWS::NoValue
-        - DynamoDBWritePolicy:
+        - DynamoDBCrudPolicy:
             TableName: !If
               - EnableDynamoDBCondition
               - !Ref JobTrackingTable  
               - !Ref AWS::NoValue
+        # ✅ PERMISOS PARA ÍNDICES GSI
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: 
+                - !If
+                  - EnableDynamoDBCondition
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BatchTrackingTable}/index/*"
+                  - !Ref AWS::NoValue
+                - !If
+                  - EnableDynamoDBCondition
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${JobTrackingTable}/index/*"
+                  - !Ref AWS::NoValue
+        # ✅ PERMISOS CLOUDWATCH
+        - CloudWatchPutMetricPolicy: {}
       Events:
         SQSEvent:
           Type: SQS
@@ -317,9 +319,9 @@ Resources:
   CRMIntegratorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-crm-integrator"
-      CodeUri: src/crm_integrator/
-      Handler: app.lambda_handler
+      FunctionName: !Sub "${AWS::StackName}-crm-integration"
+      CodeUri: src/
+      Handler: crm_integrator.app.lambda_handler
       Description: Integrates OCR results with Creatio CRM
       MemorySize: 1024
       Timeout: 300
@@ -348,6 +350,8 @@ Resources:
               - EnableDynamoDBCondition
               - !Ref JobTrackingTable
               - !Ref AWS::NoValue
+        # ✅ PERMISOS CLOUDWATCH
+        - CloudWatchPutMetricPolicy: {}
       Events:
         SQSEvent:
           Type: SQS
@@ -379,8 +383,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub "${AWS::StackName}-batch-status"
-      CodeUri: src/batch_status/
-      Handler: app.lambda_handler
+      CodeUri: src/
+      Handler: batch_status.app.lambda_handler
       Description: Returns batch processing status
       MemorySize: 512
       Timeout: 30
@@ -424,8 +428,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub "${AWS::StackName}-status"
-      CodeUri: src/status/
-      Handler: app.lambda_handler
+      CodeUri: src/
+      Handler: status.app.lambda_handler
       Description: Returns individual oficio status
       MemorySize: 256
       Timeout: 30
@@ -455,7 +459,15 @@ Resources:
   # IAM ROLES & PERMISSIONS
   # ================================
   
-  # S3 Bucket Permission for Lambda (moved to top section)
+  # S3 Bucket Permission for Lambda
+  S3InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DocumentProcessorFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub "arn:aws:s3:::${S3BucketName}"
 
   # ================================
   # CLOUDWATCH ALARMS
@@ -502,9 +514,9 @@ Resources:
 # ================================
 Outputs:
   
-  # S3 Bucket
+  # S3 Bucket (existing)
   S3BucketName:
-    Description: S3 bucket for document storage
+    Description: S3 bucket for document storage (existing bucket)
     Value: !Ref S3BucketName
     Export:
       Name: !Sub "${AWS::StackName}-S3Bucket"

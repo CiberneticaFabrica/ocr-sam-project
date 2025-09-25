@@ -1,137 +1,21 @@
 version = 0.1
-
 [default]
-[default.global]
-[default.global.parameters]
-stack_name = "ocr-sam-stack"
-
-[default.build]
-[default.build.parameters]
-cached = true
-parallel = true
-
-[default.validate]
-[default.validate.parameters]
-lint = true
-
 [default.deploy]
 [default.deploy.parameters]
-capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-confirm_changeset = true
-resolve_s3 = true
+stack_name = "ocr-sam-stack"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-x5usdugsgpkc"
 s3_prefix = "ocr-sam-stack"
 region = "us-east-1"
-image_repositories = []
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 parameter_overrides = [
     "Environment=dev",
-    "MistralApiKey=fIGM8jrDAuWDzHnidpTJ8sJBWXHXx3qg",
-    "EnableDynamoDB=true", 
     "S3BucketName=ocr-legal-documents-dev",
-    "CreatioUrl=https://11006608-demo.creatio.com",
-    "CreatioUsername=Supervisor",
-    "CreatioPassword=J$3!kb4J7BX7%sVTQSY",
-    "SESFromEmail=edwin.penalba@cibernetica.net",
-    "SESReceiveEmail=oficios@cibernetica.xyz",
-    "NotificationEnabled=true"
-]
-
-[default.package]
-[default.package.parameters]
-resolve_s3 = true
-
-[default.sync]
-[default.sync.parameters]
-watch = true
-
-[default.local_start_api]
-[default.local_start_api.parameters]
-warm_containers = "EAGER"
-
-[default.local_start_lambda]
-[default.local_start_lambda.parameters]
-warm_containers = "EAGER"
-
-# =====================================
-# CONFIGURACIÓN PARA STAGING
-# =====================================
-[staging]
-[staging.global]
-[staging.global.parameters]
-stack_name = "ocr-sam-stack-staging"
-
-[staging.deploy]
-[staging.deploy.parameters]
-capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-confirm_changeset = false  # Auto-deploy en staging
-resolve_s3 = true
-s3_prefix = "ocr-sam-stack-staging"
-region = "us-east-1"
-parameter_overrides = [
-    "Environment=staging",
     "MistralApiKey=fIGM8jrDAuWDzHnidpTJ8sJBWXHXx3qg",
-    "EnableDynamoDB=true",
-    "S3BucketName=ocr-legal-documents-staging",
     "CreatioUrl=https://11006608-demo.creatio.com",
-    "CreatioUsername=Supervisor",
-    "CreatioPassword=J$3!kb4J7BX7%sVTQSY",
-    "SESFromEmail=edwin.penalba@cibernetica.net",
-    "SESReceiveEmail=oficios@cibernetica.xyz",
-    "NotificationEnabled=true"
-]
-
-# =====================================
-# CONFIGURACIÓN PARA PRODUCCIÓN
-# =====================================
-[prod]
-[prod.global]
-[prod.global.parameters]
-stack_name = "ocr-sam-stack-prod"
-
-[prod.deploy]
-[prod.deploy.parameters]
-capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-confirm_changeset = true  # Siempre confirmar en prod
-resolve_s3 = true
-s3_prefix = "ocr-sam-stack-prod"
-region = "us-east-1"
-parameter_overrides = [
-    "Environment=prod",
-    "MistralApiKey=fIGM8jrDAuWDzHnidpTJ8sJBWXHXx3qg",
-    "EnableDynamoDB=true",  # Habilitar DynamoDB en producción
-    "S3BucketName=ocr-legal-documents-prod",
-    "CreatioUrl=https://11006608-demo.creatio.com",
-    "CreatioUsername=Supervisor",
-    "CreatioPassword=J$3!kb4J7BX7%sVTQSY",
-    "SESFromEmail=edwin.penalba@cibernetica.net",
-    "SESReceiveEmail=oficios@cibernetica.xyz",
-    "NotificationEnabled=true"
-]
-
-# =====================================
-# CONFIGURACIÓN PARA TESTING LOCAL
-# =====================================
-[local]
-[local.global]
-[local.global.parameters]
-stack_name = "ocr-sam-stack-local"
-
-[local.deploy]
-[local.deploy.parameters]
-capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-confirm_changeset = false
-resolve_s3 = true
-s3_prefix = "ocr-sam-stack-local"
-region = "us-east-1"
-parameter_overrides = [
-    "Environment=local",
-    "MistralApiKey=fIGM8jrDAuWDzHnidpTJ8sJBWXHXx3qg",
-    "EnableDynamoDB=true",
-    "S3BucketName=ocr-legal-documents-local",
-    "CreatioApiEndpoint=https://api.creatio.com",
-    "CreatioApiKey=your-creatio-api-key",
-    "SESFromEmail=edwin.penalba@cibernetica.net",
-    "SESReceiveEmail=oficios@cibernetica.xyz",
-    "NotificationEnabled=true"
+    "CreatioUsername=Supervisor", 
+    "CreatioPassword=!k*ZPCT&MkuF2cDiM!S",
+    "EnableDynamoDB=true"
 ]
 [y.deploy.parameters]
 stack_name = "ocr-sam-stack"

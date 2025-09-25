@@ -1,5 +1,6 @@
 # src/services/pdf_service.py
-import fitz  # PyMuPDF
+import PyPDF2
+import io
 import boto3
 import json
 import logging
@@ -33,52 +34,31 @@ class PDFService:
             raise PDFProcessingError(f"Failed to download PDF: {str(e)}")
     
     def split_into_oficios(self, pdf_content: bytes, batch_id: str, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Split PDF into individual oficios by detecting separators"""
+        """Split PDF into individual oficios"""
         try:
-            logger.info("✂️ Starting PDF split into oficios by separators")
+            logger.info("✂️ Starting PDF split into oficios using separator detection")
             
             # Open PDF document
-            pdf_doc = fitz.open(stream=pdf_content, filetype="pdf")
-            
-            # Skip first page if it contains metadata/config
-            start_page = 1 if self._has_config_page(pdf_doc) else 0
+            pdf_stream = io.BytesIO(pdf_content)
+            pdf_reader = PyPDF2.PdfReader(pdf_stream)
             
             # Find separator pages
-            separator_pages = self._find_separator_pages(pdf_doc, start_page)
-            logger.info(f"🔍 Found {len(separator_pages)} separator pages: {separator_pages}")
+            separator_pages = self._find_separator_pages(pdf_reader)
+            logger.info(f"🔍 Found {len(separator_pages)} separator pages")
             
             oficios = []
-            oficio_number = 1
             
-            # Split by separators
-            current_page = start_page
-            for separator_page in separator_pages + [pdf_doc.page_count]:
-                if current_page >= separator_page:
-                    continue
-                    
-                # Create individual oficio from current_page to separator_page-1
-                oficio_doc = fitz.open()
-                for page_num in range(current_page, separator_page):
-                    oficio_doc.insert_pdf(pdf_doc, from_page=page_num, to_page=page_num)
-                
-                # Generate oficio data
-                oficio_data = {
-                    'oficio_id': f"{batch_id}_oficio_{oficio_number:03d}",
-                    'batch_id': batch_id,
-                    'oficio_number': oficio_number,
-                    'page_range': [current_page, separator_page - 1],
-                    'total_pages': separator_page - current_page,
-                    'pdf_content': oficio_doc.write(),
-                    'created_at': datetime.utcnow().isoformat()
-                }
-                
-                oficios.append(oficio_data)
-                oficio_doc.close()
-                
-                current_page = separator_page
-                oficio_number += 1
+            if separator_pages:
+                # Split using separator pages
+                oficios = self._split_by_separators(pdf_reader, separator_pages, batch_id)
+            else:
+                # Fallback to page-based splitting
+                logger.warning("⚠️ No separators found, falling back to page-based splitting")
+                oficios = self._split_by_pages(pdf_reader, batch_id, metadata)
             
-            pdf_doc.close()
+            # Validate count
+            declared_count = metadata.get('cantidad_oficios_declarada', 0)
+            logger.info(f"📊 Validating count - Declared: {declared_count}, Extracted: {len(oficios)}")
             
             logger.info(f"✅ PDF split completed: {len(oficios)} oficios created")
             return oficios
@@ -86,49 +66,154 @@ class PDFService:
         except Exception as e:
             raise PDFProcessingError(f"Failed to split PDF: {str(e)}")
     
-    def _find_separator_pages(self, pdf_doc, start_page: int) -> List[int]:
-        """Find pages that contain separator text (not actual oficios)"""
+    def _find_separator_pages(self, pdf_reader: PyPDF2.PdfReader) -> List[int]:
+        """Find pages that act as separators between oficios"""
         try:
             separator_pages = []
             
-            for page_num in range(start_page, pdf_doc.page_count):
-                page = pdf_doc[page_num]
-                text = page.get_text().strip().lower()
+            for page_num in range(len(pdf_reader.pages)):
+                page = pdf_reader.pages[page_num]
+                text = page.extract_text().lower()
                 
-                # Check if this page is a separator (contains separator keywords)
-                separator_keywords = [
+                # Look for specific separator patterns
+                separator_patterns = [
+                    'separador de oficios',
+                    '=====================',
                     'separador',
-                    'separator', 
-                    'oficio',
-                    'oficio número',
-                    'oficio no',
-                    'oficio #',
-                    'cantidad_oficios',
-                    'empresa',
-                    'configuración',
-                    'lote',
-                    'batch'
+                    'divisor',
+                    '---',
+                    '==='
                 ]
                 
-                # If page contains separator keywords and is short (likely just a separator)
-                if any(keyword in text for keyword in separator_keywords) and len(text) < 200:
+                # Check if this page is a separator (not content)
+                is_separator = False
+                for pattern in separator_patterns:
+                    if pattern in text:
+                        # Additional check: separator pages are usually short
+                        if len(text.strip()) < 200:  # Separator pages are typically short
+                            is_separator = True
+                            break
+                
+                if is_separator:
                     separator_pages.append(page_num)
-                    logger.info(f"🔍 Found separator page {page_num}: {text[:100]}...")
             
             return separator_pages
             
         except Exception as e:
-            logger.error(f"❌ Error finding separator pages: {str(e)}")
+            logger.warning(f"Error finding separators: {str(e)}")
             return []
     
-    def _has_config_page(self, pdf_doc) -> bool:
+    def _split_by_separators(self, pdf_reader: PyPDF2.PdfReader, separator_pages: List[int], batch_id: str) -> List[Dict[str, Any]]:
+        """Split PDF using separator pages"""
+        try:
+            oficios = []
+            oficio_number = 1
+            
+            # Simple approach: create one oficio per separator
+            # Each separator marks the end of one oficio and start of the next
+            for i, sep_page in enumerate(separator_pages):
+                # Determine start page
+                if i == 0:
+                    start_page = 0
+                else:
+                    start_page = separator_pages[i-1] + 1
+                
+                # Determine end page
+                end_page = sep_page
+                
+                # Only create oficio if there are pages
+                if end_page > start_page:
+                    oficio_data = self._create_oficio_from_pages(
+                        pdf_reader, start_page, end_page, batch_id, oficio_number
+                    )
+                    oficios.append(oficio_data)
+                    oficio_number += 1
+            
+            # Add final oficio if there are pages after last separator
+            if separator_pages and separator_pages[-1] + 1 < len(pdf_reader.pages):
+                start_page = separator_pages[-1] + 1
+                end_page = len(pdf_reader.pages)
+                
+                if end_page > start_page:
+                    oficio_data = self._create_oficio_from_pages(
+                        pdf_reader, start_page, end_page, batch_id, oficio_number
+                    )
+                    oficios.append(oficio_data)
+            
+            return oficios
+            
+        except Exception as e:
+            logger.error(f"Error splitting by separators: {str(e)}")
+            return []
+    
+    def _split_by_pages(self, pdf_reader: PyPDF2.PdfReader, batch_id: str, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Split PDF by pages (fallback method)"""
+        try:
+            oficios = []
+            oficio_number = 1
+            oficios_per_page = metadata.get('oficios_per_page', 1)
+            
+            # Skip first page if it contains metadata/config
+            start_page = 1 if self._has_config_page(pdf_reader) else 0
+            
+            current_page = start_page
+            total_pages = len(pdf_reader.pages)
+            
+            while current_page < total_pages:
+                end_page = min(current_page + oficios_per_page, total_pages)
+                
+                oficio_data = self._create_oficio_from_pages(
+                    pdf_reader, current_page, end_page, batch_id, oficio_number
+                )
+                oficios.append(oficio_data)
+                
+                current_page = end_page
+                oficio_number += 1
+            
+            return oficios
+            
+        except Exception as e:
+            logger.error(f"Error splitting by pages: {str(e)}")
+            return []
+    
+    def _create_oficio_from_pages(self, pdf_reader: PyPDF2.PdfReader, start_page: int, end_page: int, batch_id: str, oficio_number: int) -> Dict[str, Any]:
+        """Create an oficio from a range of pages"""
+        try:
+            # Create new PDF writer
+            pdf_writer = PyPDF2.PdfWriter()
+            
+            # Add pages to the writer
+            for page_num in range(start_page, end_page):
+                pdf_writer.add_page(pdf_reader.pages[page_num])
+            
+            # Write to bytes
+            output_stream = io.BytesIO()
+            pdf_writer.write(output_stream)
+            pdf_content = output_stream.getvalue()
+            output_stream.close()
+            
+            return {
+                'oficio_id': f"{batch_id}_oficio_{oficio_number:03d}",
+                'batch_id': batch_id,
+                'oficio_number': oficio_number,
+                'page_range': [start_page, end_page - 1],
+                'total_pages': end_page - start_page,
+                'pdf_content': pdf_content,
+                'created_at': datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating oficio: {str(e)}")
+            raise PDFProcessingError(f"Failed to create oficio: {str(e)}")
+    
+    def _has_config_page(self, pdf_reader: PyPDF2.PdfReader) -> bool:
         """Check if first page contains configuration data"""
         try:
-            if pdf_doc.page_count < 2:
+            if len(pdf_reader.pages) < 2:
                 return False
                 
-            first_page = pdf_doc[0]
-            text = first_page.get_text().lower()
+            first_page = pdf_reader.pages[0]
+            text = first_page.extract_text().lower()
             
             # Look for configuration keywords
             config_keywords = ['cantidad_oficios', 'empresa', 'configuración', 'lote']

@@ -1,0 +1,4 @@
+# OCR SAM Project - Essential Dependencies Only
+boto3>=1.26.0
+PyPDF2>=3.0.0
+requests>=2.28.0

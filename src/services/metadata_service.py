@@ -1,5 +1,6 @@
 # src/services/metadata_service.py
-import fitz
+import PyPDF2
+import io
 import re
 import logging
 from typing import Dict, Any, Optional
@@ -18,26 +19,25 @@ class MetadataService:
             logger.info("📋 Extracting metadata from PDF first page")
             
             # Open PDF and get first page
-            pdf_doc = fitz.open(stream=pdf_content, filetype="pdf")
+            pdf_stream = io.BytesIO(pdf_content)
+            pdf_reader = PyPDF2.PdfReader(pdf_stream)
             
-            if pdf_doc.page_count == 0:
+            if len(pdf_reader.pages) == 0:
                 raise ValidationError("PDF is empty")
             
-            first_page = pdf_doc[0]
-            text = first_page.get_text()
+            first_page = pdf_reader.pages[0]
+            text = first_page.extract_text()
             
             # Extract metadata using patterns
             metadata = self._parse_metadata_text(text)
             
             # Add PDF information
             metadata.update({
-                'total_pages': pdf_doc.page_count,
+                'total_pages': len(pdf_reader.pages),
                 'pdf_size_bytes': len(pdf_content),
                 'extraction_timestamp': datetime.utcnow().isoformat(),
                 'source': 's3_direct'
             })
-            
-            pdf_doc.close()
             
             logger.info(f"📊 Metadata extracted: {metadata}")
             return metadata

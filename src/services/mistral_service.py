@@ -1,20 +1,22 @@
-# src/services/mistral_service.py
+# src/services/mistral_service.py - VERSIÓN SIMPLIFICADA
 import json
 import requests
 import logging
+import random
+import time
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
 from shared.config import Config
-from shared.exceptions import OCRBaseException
+from shared.exceptions import MistralAPIError
 
 logger = logging.getLogger(__name__)
 config = Config()
 
 @dataclass
 class MistralResult:
-    """Result of Mistral AI analysis"""
+    """Result of Mistral AI analysis (for text-only analysis)"""
     success: bool
     data: Dict[str, Any] = None
     error: str = ""
@@ -22,48 +24,56 @@ class MistralResult:
     processing_time: float = 0.0
 
 class MistralService:
-    """Service for Mistral AI text analysis"""
+    """
+    Service for Mistral AI text analysis (complementary to OCR Service)
+    
+    Note: OCR functionality has been moved to OCRService.
+    This service now handles text-only analysis and chat completions.
+    """
     
     def __init__(self):
         self.api_key = config.MISTRAL_API_KEY
-        self.api_url = "https://api.mistral.ai/v1/chat/completions"
+        self.chat_api_url = "https://api.mistral.ai/v1/chat/completions"
         self.model = "mistral-large-latest"
         self.max_retries = 3
-        self.timeout = 300  # 5 minutes
+        self.timeout = 120  # 2 minutes for text analysis
+        self.base_delay = 2
+        self.max_delay = 60
     
-    def analyze_oficio_text(self, text: str, job_id: str) -> MistralResult:
-        """Analyze oficio text with Mistral AI"""
+    def analyze_text_content(self, text: str, analysis_type: str = "legal_analysis", 
+                           custom_prompt: str = None) -> MistralResult:
+        """
+        Analyze text content using Mistral AI chat completions
+        (For when you already have extracted text and need additional analysis)
+        """
         try:
             start_time = datetime.now()
-            logger.info(f"🤖 Starting Mistral AI analysis for job {job_id}")
+            logger.info(f"Starting Mistral text analysis - Type: {analysis_type}")
             
-            # Log input text for debugging
-            logger.info(f"📝 Input text for analysis: {len(text)} chars")
-            logger.info(f"📄 Text preview: {text[:300]}...")
-            
-            # Prepare prompt
-            prompt = self._create_analysis_prompt(text)
-            logger.info(f"📋 Prompt created: {len(prompt)} chars")
+            # Prepare prompt based on analysis type
+            if custom_prompt:
+                prompt = custom_prompt
+            elif analysis_type == "legal_analysis":
+                prompt = self._create_legal_analysis_prompt(text)
+            elif analysis_type == "document_summary":
+                prompt = self._create_summary_prompt(text)
+            elif analysis_type == "entity_extraction":
+                prompt = self._create_entity_extraction_prompt(text)
+            else:
+                prompt = f"Analyze the following text and provide structured insights:\n\n{text}"
             
             # Make API request
-            response = self._make_api_request(prompt)
+            response = self._make_chat_api_request(prompt)
             
             if not response:
-                return MistralResult(False, error="No response from Mistral API")
-            
-            # Log raw response for debugging
-            logger.info(f"🤖 Raw Mistral response: {len(response)} chars")
-            logger.info(f"📄 Response preview: {response[:500]}...")
+                return MistralResult(False, error="No response from Mistral Chat API")
             
             # Parse response
-            parsed_data = self._parse_mistral_response(response)
-            
-            # Log parsed data for debugging
-            logger.info(f"📊 Parsed data: tipo={parsed_data.get('tipo_oficio_detectado')}, palabras={len(parsed_data.get('palabras_clave_encontradas', []))}, personas={len(parsed_data.get('informacion_extraida', {}).get('personas', []))}")
+            parsed_data = self._parse_chat_response(response)
             
             processing_time = (datetime.now() - start_time).total_seconds()
             
-            logger.info(f"✅ Mistral analysis completed in {processing_time:.2f}s")
+            logger.info(f"Mistral text analysis completed in {processing_time:.2f}s")
             
             return MistralResult(
                 success=True,
@@ -73,57 +83,101 @@ class MistralService:
             )
             
         except Exception as e:
-            logger.error(f"❌ Mistral analysis failed: {str(e)}")
+            logger.error(f"Mistral text analysis failed: {str(e)}")
             return MistralResult(False, error=str(e))
     
-    def _create_analysis_prompt(self, text: str) -> str:
-        """Create structured prompt for Mistral AI"""
+    def analyze_oficio_text(self, text: str, job_id: str) -> MistralResult:
+        """
+        Legacy method for backward compatibility
+        
+        Note: For new implementations, use OCRService.extract_text_from_pdf() 
+        which includes integrated OCR + AI analysis
+        """
+        logger.warning("analyze_oficio_text is deprecated. Use OCRService for integrated OCR+AI processing.")
+        
+        return self.analyze_text_content(
+            text, 
+            analysis_type="legal_analysis",
+            custom_prompt=self._create_legal_analysis_prompt(text)
+        )
+    
+    def _create_legal_analysis_prompt(self, text: str) -> str:
+        """Create prompt for legal document analysis"""
         return f"""
-        Eres un experto en análisis de documentos legales panameños. Analiza el siguiente texto de un oficio legal y extrae la información estructurada.
+        Analiza el siguiente texto de un documento legal y extrae información estructurada.
 
-        TEXTO DEL OFICIO:
+        TEXTO:
         {text}
 
         INSTRUCCIONES:
-        1. Extrae toda la información disponible en formato JSON
-        2. Si no encuentras un campo, usa null
-        3. Para fechas, usa formato YYYY-MM-DD
-        4. Para montos, extrae solo el número sin símbolos
-        5. Para personas, incluye nombre, tipo y rol si está disponible
+        1. Identifica el tipo de documento legal
+        2. Extrae información clave como números de oficio, fechas, autoridades
+        3. Identifica personas mencionadas
+        4. Clasifica el documento según los tipos de oficios legales conocidos
+        5. Proporciona un nivel de confianza en tu análisis
 
-        RESPONDE ÚNICAMENTE CON UN JSON VÁLIDO CON ESTA ESTRUCTURA:
+        RESPONDE EN FORMATO JSON con esta estructura:
         {{
-            "palabras_clave_encontradas": ["palabra1", "palabra2"],
-            "tipo_oficio_detectado": "tipo",
+            "tipo_documento": "tipo identificado",
             "nivel_confianza": "alto|medio|bajo",
-            "informacion_extraida": {{
+            "informacion_clave": {{
                 "numero_oficio": "string o null",
-                "autoridad": "string o null", 
-                "fecha_emision": "YYYY-MM-DD o null",
-                "fecha_recibido": "YYYY-MM-DD o null",
-                "oficiado_cliente": "string o null",
-                "numero_identificacion": "string o null",
-                "expediente": "string o null",
-                "fecha_auto": "YYYY-MM-DD o null",
-                "numero_auto": "string o null",
-                "monto": "number o null",
-                "sucursal_recibido": "string o null",
-                "carpeta": "string o null",
-                "vencimiento": "YYYY-MM-DD o null",
-                "personas": [
-                    {{
-                        "nombre": "string",
-                        "tipo": "Deudor|Fiador|Testigo|Abogado|Otro",
-                        "identificacion": "string o null",
-                        "rol": "string o null"
-                    }}
-                ]
-            }}
+                "autoridad": "string o null",
+                "fecha": "string o null",
+                "destinatario": "string o null"
+            }},
+            "personas_identificadas": [
+                {{
+                    "nombre": "string",
+                    "rol": "string",
+                    "identificacion": "string o null"
+                }}
+            ],
+            "clasificacion": "tipo de oficio",
+            "resumen": "resumen del contenido"
         }}
         """
     
-    def _make_api_request(self, prompt: str) -> Optional[str]:
-        """Make request to Mistral API with retries"""
+    def _create_summary_prompt(self, text: str) -> str:
+        """Create prompt for document summarization"""
+        return f"""
+        Resume el siguiente texto de manera concisa y estructurada:
+
+        TEXTO:
+        {text}
+
+        Proporciona un resumen que incluya:
+        1. Tema principal
+        2. Puntos clave
+        3. Personas o entidades mencionadas
+        4. Fechas importantes
+        5. Acciones requeridas (si las hay)
+
+        Responde en formato JSON estructurado.
+        """
+    
+    def _create_entity_extraction_prompt(self, text: str) -> str:
+        """Create prompt for entity extraction"""
+        return f"""
+        Extrae todas las entidades importantes del siguiente texto:
+
+        TEXTO:
+        {text}
+
+        Identifica y estructura:
+        - Nombres de personas
+        - Organizaciones
+        - Fechas
+        - Números de documentos
+        - Direcciones
+        - Montos monetarios
+        - Términos legales importantes
+
+        Responde en formato JSON estructurado.
+        """
+    
+    def _make_chat_api_request(self, prompt: str) -> Optional[str]:
+        """Make request to Mistral Chat API with retries"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -144,10 +198,10 @@ class MistralService:
         
         for attempt in range(self.max_retries):
             try:
-                logger.info(f"🌐 Mistral API request attempt {attempt + 1}")
+                logger.info(f"Mistral Chat API request attempt {attempt + 1}")
                 
                 response = requests.post(
-                    self.api_url,
+                    self.chat_api_url,
                     headers=headers,
                     json=payload,
                     timeout=self.timeout
@@ -157,33 +211,35 @@ class MistralService:
                     result = response.json()
                     if 'choices' in result and len(result['choices']) > 0:
                         content = result['choices'][0]['message']['content']
-                        logger.info(f"✅ Mistral API success on attempt {attempt + 1}")
+                        logger.info(f"Mistral Chat API success on attempt {attempt + 1}")
                         return content.strip()
                 
                 elif response.status_code == 429:
-                    # Rate limit - wait and retry
-                    wait_time = (attempt + 1) * 10
-                    logger.warning(f"⏳ Rate limit hit, waiting {wait_time}s")
-                    import time
-                    time.sleep(wait_time)
+                    # Rate limit - exponential backoff
+                    wait_time = self.base_delay * (2 ** attempt)
+                    jitter = random.uniform(0, wait_time * 0.1)
+                    total_wait = min(wait_time + jitter, self.max_delay)
+                    
+                    logger.warning(f"Rate limit hit, waiting {total_wait:.1f}s (attempt {attempt + 1})")
+                    time.sleep(total_wait)
                     continue
                 
                 else:
-                    logger.warning(f"⚠️ API returned status {response.status_code}: {response.text}")
+                    logger.warning(f"API returned status {response.status_code}: {response.text}")
                     
             except requests.exceptions.Timeout:
-                logger.warning(f"⏰ Timeout on attempt {attempt + 1}")
+                logger.warning(f"Timeout on attempt {attempt + 1}")
                 continue
                 
             except requests.exceptions.RequestException as e:
-                logger.warning(f"🌐 Request error on attempt {attempt + 1}: {str(e)}")
+                logger.warning(f"Request error on attempt {attempt + 1}: {str(e)}")
                 continue
         
-        logger.error("❌ All Mistral API attempts failed")
+        logger.error("All Mistral Chat API attempts failed")
         return None
     
-    def _parse_mistral_response(self, response: str) -> Dict[str, Any]:
-        """Parse and validate Mistral AI response"""
+    def _parse_chat_response(self, response: str) -> Dict[str, Any]:
+        """Parse and validate Mistral Chat response"""
         try:
             # Try to find JSON in response
             json_start = response.find('{')
@@ -193,28 +249,47 @@ class MistralService:
                 json_str = response[json_start:json_end]
                 parsed = json.loads(json_str)
                 
-                # Validate structure
-                if 'informacion_extraida' in parsed:
+                # Basic validation
+                if isinstance(parsed, dict):
                     return parsed
             
             # If no valid JSON found, create basic structure
-            logger.warning("⚠️ Could not parse Mistral response as JSON, creating basic structure")
+            logger.warning("Could not parse Mistral response as JSON, creating basic structure")
             return {
-                "palabras_clave_encontradas": [],
-                "tipo_oficio_detectado": "No identificado",
+                "tipo_documento": "No identificado",
                 "nivel_confianza": "bajo",
-                "informacion_extraida": {},
+                "informacion_clave": {},
                 "raw_response": response
             }
             
         except json.JSONDecodeError as e:
-            logger.error(f"❌ JSON parsing error: {str(e)}")
+            logger.error(f"JSON parsing error: {str(e)}")
             return {
-                "palabras_clave_encontradas": [],
-                "tipo_oficio_detectado": "Error de parsing",
+                "tipo_documento": "Error de parsing",
                 "nivel_confianza": "bajo",
-                "informacion_extraida": {},
+                "informacion_clave": {},
                 "parsing_error": str(e),
                 "raw_response": response
             }
-
+    
+    def get_service_info(self) -> Dict[str, Any]:
+        """Get service information"""
+        return {
+            'service_name': 'MistralService_TextAnalysis',
+            'version': '2.0',
+            'api_endpoint': self.chat_api_url,
+            'model': self.model,
+            'capabilities': [
+                'text_analysis',
+                'legal_document_analysis', 
+                'document_summarization',
+                'entity_extraction'
+            ],
+            'note': 'OCR functionality moved to OCRService',
+            'configuration': {
+                'max_retries': self.max_retries,
+                'timeout': self.timeout,
+                'base_delay': self.base_delay,
+                'max_delay': self.max_delay
+            }
+        }

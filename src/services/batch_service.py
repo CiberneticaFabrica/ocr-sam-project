@@ -65,7 +65,7 @@ class BatchService:
                 ExpressionAttributeValues={
                     ':status': status,
                     ':updated': update_data['last_updated'],
-                    **((':message', message) if message else {})
+                    **({':message': message} if message else {})
                 }
             )
             
