@@ -376,22 +376,42 @@ def format_enhanced_result(ocr_result: OCRResult, message_data: Dict[str, Any]) 
                     'asunto': clean_value(info_general.get('asunto'))
                 }
             
-            # Persons list (compatible with existing CRM format)
-            if 'lista_personas' in structured_data:
+            # 🔧 FIX CRÍTICO: Persons list - buscar en AMBOS campos
+            personas_list = []
+            monto_total = 0.0
+            
+            # Prioridad 1: lista_clientes (campo del OCR Mistral)
+            if 'lista_clientes' in structured_data:
+                lista_clientes = structured_data['lista_clientes']
+                if isinstance(lista_clientes, list) and lista_clientes:
+                    personas_list = lista_clientes
+                    logger.info(f"✅ Found {len(personas_list)} persons in lista_clientes")
+            
+            # Prioridad 2: lista_personas (campo alternativo)
+            elif 'lista_personas' in structured_data:
                 lista_personas = structured_data['lista_personas']
                 if isinstance(lista_personas, dict) and 'listado' in lista_personas:
-                    formatted_result['lista_personas'] = {
-                        'listado': format_personas_for_crm(lista_personas['listado']),
-                        'monto_total': lista_personas.get('monto_total', 0)
-                    }
+                    personas_list = lista_personas['listado']
+                    logger.info(f"✅ Found {len(personas_list)} persons in lista_personas.listado")
                 elif isinstance(lista_personas, list):
-                    formatted_result['lista_personas'] = {
-                        'listado': format_personas_for_crm(lista_personas),
-                        'monto_total': sum(p.get('monto_numerico', 0) for p in lista_personas if isinstance(p, dict))
-                    }
-                else:
-                    logger.warning(f"⚠️ Unexpected lista_personas type: {type(lista_personas)}")
-                    formatted_result['lista_personas'] = {'listado': [], 'monto_total': 0}
+                    personas_list = lista_personas
+                    logger.info(f"✅ Found {len(personas_list)} persons in lista_personas")
+            
+            # Formatear personas para CRM si se encontraron
+            if personas_list:
+                formatted_personas = format_personas_for_crm(personas_list)
+                monto_total = sum(p.get('monto_numerico', 0) for p in formatted_personas)
+                
+                formatted_result['lista_personas'] = {
+                    'listado': formatted_personas,
+                    'monto_total': monto_total
+                }
+                
+                logger.info(f"✅ Formatted {len(formatted_personas)} persons for CRM")
+                logger.info(f"💰 Total amount: {monto_total}")
+            else:
+                logger.warning(f"⚠️ No persons found in structured_data")
+                formatted_result['lista_personas'] = {'listado': [], 'monto_total': 0}
             
             # Keywords found
             if 'palabras_clave_encontradas' in structured_data:
@@ -422,7 +442,8 @@ def format_enhanced_result(ocr_result: OCRResult, message_data: Dict[str, Any]) 
             'has_structured_data': bool(ocr_result.structured_data),
             'extraction_method': 'enhanced_mistral_ocr_v2',
             'api_model': ocr_result.metadata.get('api_model', 'mistral-ocr-latest'),
-            'processing_version': '2.1'
+            'processing_version': '2.1',
+            'persons_found': len(formatted_result.get('lista_personas', {}).get('listado', []))
         }
         
         return formatted_result
@@ -436,7 +457,8 @@ def format_enhanced_result(ocr_result: OCRResult, message_data: Dict[str, Any]) 
             'texto_completo': ocr_result.text,
             'processed_at': datetime.utcnow().isoformat(),
             'extraction_method': 'enhanced_mistral_ocr_v2_fallback',
-            'enhanced_processing': True
+            'enhanced_processing': True,
+            'lista_personas': {'listado': [], 'monto_total': 0}
         }
 
 def format_personas_for_crm(personas_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -454,6 +476,12 @@ def format_personas_for_crm(personas_list: List[Dict[str, Any]]) -> List[Dict[st
                 continue
                 
             nombres = nombre_completo.split()
+            
+            # 🔧 FIX: Obtener identificación de AMBOS campos posibles
+            identificacion = (
+                clean_value(persona.get('numero_identificacion', '')) or 
+                clean_value(persona.get('identificacion', ''))
+            )
             
             # Parse amount
             monto_str = clean_value(persona.get('monto', '0'))
@@ -473,16 +501,22 @@ def format_personas_for_crm(personas_list: List[Dict[str, Any]]) -> List[Dict[st
                 'apellido_paterno': nombres[1] if len(nombres) > 1 else '',
                 'apellido_materno': nombres[2] if len(nombres) > 2 else '',
                 'nombre_segundo': ' '.join(nombres[3:]) if len(nombres) > 3 else '',
-                'identificacion': clean_value(persona.get('identificacion', '')),
+                'identificacion': identificacion,
+                'numero_identificacion': identificacion,  # Campo duplicado para compatibilidad
                 'numero_cuenta': clean_value(persona.get('numero_cuenta', '')),
+                'numero_ruc': clean_value(persona.get('numero_ruc', '')),
                 'monto': monto_str,
                 'monto_numerico': monto_numerico,
                 'expediente': clean_value(persona.get('expediente', '')),
                 'observaciones': clean_value(persona.get('observaciones', f'Persona extraída por OCR v2 - Secuencia: {i + 1}'))
             }
             
+            # Log para debugging
+            logger.info(f"👤 Formatted person {i+1}: {nombre_completo} (ID: {identificacion}, Monto: {monto_numerico})")
+            
             formatted_personas.append(formatted_person)
         
+        logger.info(f"✅ Successfully formatted {len(formatted_personas)} persons for CRM")
         return formatted_personas
         
     except Exception as e:
