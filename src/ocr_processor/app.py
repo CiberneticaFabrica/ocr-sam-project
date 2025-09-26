@@ -13,6 +13,7 @@ from services.tracking_service import TrackingService
 from shared.config import Config
 from shared.exceptions import OCRBaseException
 from shared.utils import ResponseFormatter, Logger
+from services.post_ocr_validator import PostOCRValidator
 
 # Setup logging
 logger = Logger.setup_logger(__name__)
@@ -170,8 +171,12 @@ def process_batch_oficio_enhanced(message_data: Dict[str, Any], context) -> Dict
         if not ocr_result.success:
             raise OCRBaseException(f"Enhanced OCR failed: {ocr_result.error}")
         
+        # Step 2.5: Post-OCR validation and enrichment
+        validator = PostOCRValidator()
+        ocr_result_enriched = validator.enrich_ocr_result(ocr_result)
+        
         # Step 3: Format and validate results
-        formatted_result = format_enhanced_result(ocr_result, message_data)
+        formatted_result = format_enhanced_result(ocr_result_enriched, message_data)
         
         # Step 4: Store enhanced results
         storage_service.save_ocr_result(job_id, formatted_result)
@@ -271,8 +276,12 @@ def process_individual_job_enhanced(job_id: str, context) -> Dict[str, Any]:
         if not ocr_result.success:
             raise OCRBaseException(f"Enhanced OCR failed: {ocr_result.error}")
         
+        # Post-OCR validation and enrichment
+        validator = PostOCRValidator()
+        ocr_result_enriched = validator.enrich_ocr_result(ocr_result)
+        
         # Format and store results
-        formatted_result = format_enhanced_result(ocr_result, {'job_id': job_id})
+        formatted_result = format_enhanced_result(ocr_result_enriched, {'job_id': job_id})
         storage_service.save_ocr_result(job_id, formatted_result)
         
         # Update tracking

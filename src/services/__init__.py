@@ -21,6 +21,7 @@ from .ocr_service import OCRService, OCRResult  # Enhanced version
 from .mistral_service import MistralService, MistralResult  # Text-only version
 from .storage_service import StorageService
 from .tracking_service import TrackingService
+from .post_ocr_validator import PostOCRValidator
 
 # Clean services - no hybrid OCR
 
@@ -34,7 +35,8 @@ __all__ = [
     'MistralService',    # Text-only analysis service
     'MistralResult',     # Text analysis result class
     'StorageService',
-    'TrackingService'
+    'TrackingService',
+    'PostOCRValidator'   # Post-OCR validation and enrichment
 ]
 
 __version__ = '2.1.0'

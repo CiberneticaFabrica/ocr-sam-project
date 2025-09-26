@@ -125,8 +125,7 @@ class OCRService:
 
     def _create_legal_document_annotation_schema(self) -> Dict[str, Any]:
         """
-        Crea el schema especializado para documentos legales
-        Basado en tu implementación exitosa
+        Schema CORREGIDO para extraer personas/clientes correctamente
         """
         return {
             "type": "json_schema",
@@ -198,13 +197,18 @@ class OCRService:
                                     "title": "Asunto",
                                     "description": "Descripción del asunto",
                                     "type": "string"
+                                },
+                                "expediente": {
+                                    "title": "Expediente",
+                                    "description": "Número de expediente judicial si aplica",
+                                    "type": "string"
                                 }
                             },
                             "required": ["numero_oficio", "fecha", "autoridad_emisora", "destinatario"]
                         },
                         "lista_clientes": {
                             "title": "Lista_Clientes",
-                            "description": "Lista de clientes/personas mencionados en el documento legal panameño",
+                            "description": "CRITICAL: Lista COMPLETA de todas las personas, clientes, agentes económicos, empleadores o cualquier individuo mencionado en el documento legal panameño. DEBE extraer TODOS los registros de CUALQUIER tabla presente en el documento.",
                             "type": "array",
                             "items": {
                                 "type": "object",
@@ -212,47 +216,52 @@ class OCRService:
                                 "properties": {
                                     "nombre_completo": {
                                         "title": "Nombre_Completo",
-                                        "description": "Nombre y apellidos completos de la persona",
+                                        "description": "Nombre y apellidos completos de la persona o razón social de la empresa",
                                         "type": "string"
                                     },
                                     "numero_identificacion": {
                                         "title": "Numero_Identificacion",
-                                        "description": "Cédula panameña (formato: X-XXX-XXXX) o documento de identidad",
+                                        "description": "Cédula panameña (formato: X-XXX-XXXX) o cualquier documento de identidad mencionado",
                                         "type": "string"
                                     },
                                     "numero_ruc": {
                                         "title": "Numero_RUC",
-                                        "description": "Número RUC panameño (formato: XXX-XXXXXX-XX-DV)",
+                                        "description": "Número RUC panameño (formato: XXX-XXXXXX-XX-DV) o folio de empresa",
                                         "type": "string"
                                     },
                                     "numero_cuenta": {
                                         "title": "Numero_Cuenta",
-                                        "description": "Número de cuenta bancaria si aplica",
+                                        "description": "Número de cuenta bancaria si se menciona",
+                                        "type": "string"
+                                    },
+                                    "numero_empleador": {
+                                        "title": "Numero_Empleador",
+                                        "description": "Número de empleador si se menciona (común en oficios laborales)",
                                         "type": "string"
                                     },
                                     "monto": {
                                         "title": "Monto",
-                                        "description": "Monto asociado en balboas (ej: B/. 1,500.00)",
+                                        "description": "Monto asociado en balboas con formato (ej: B/. 1,500.00 o 1,500.00)",
                                         "type": "string"
                                     },
                                     "monto_numerico": {
                                         "title": "Monto_Numerico",
-                                        "description": "Monto como número decimal",
+                                        "description": "Monto como número decimal puro sin formato",
                                         "type": "number"
                                     },
                                     "expediente": {
                                         "title": "Expediente",
-                                        "description": "Número de expediente judicial",
+                                        "description": "Número de expediente judicial asociado a esta persona",
                                         "type": "string"
                                     },
                                     "tipo_persona": {
                                         "title": "Tipo_Persona",
-                                        "description": "Tipo de persona (Cliente, Agente Económico, Demandado, etc.)",
+                                        "description": "Tipo de persona (Cliente, Agente Económico, Empleador, Demandado, Representante Legal, etc.)",
                                         "type": "string"
                                     },
                                     "observaciones": {
                                         "title": "Observaciones",
-                                        "description": "Notas o observaciones adicionales sobre la persona",
+                                        "description": "Notas adicionales o contexto sobre la persona",
                                         "type": "string"
                                     }
                                 },
@@ -285,6 +294,91 @@ class OCRService:
                 "strict": True
             }
         }
+
+    # PROMPT MEJORADO PARA GUIAR A MISTRAL
+    def _get_legal_classification_prompt_enhanced(self) -> str:
+        """
+        Prompt MEJORADO que ENFATIZA la extracción de TODAS las personas
+        """
+        return """Analiza este documento legal panameño y extrae información estructurada.
+
+    TIPOS DE OFICIOS PANAMEÑOS:
+    1. Oficios de Secuestros Civiles (Secuestros - Civil)
+    2. Oficios de Aprehensiones (Secuestros - Civil)  
+    3. Oficios de Solicitud de Traslado de Fondos Aprehendidos (Secuestros - Civil)
+    4. Oficios de Levantamiento Civiles y Penales (Levantamientos - Civil)
+    5. Oficios de Embargos (Embargos - Civil)
+    6. Oficios de Adjudicación en Procesos de Sucesión (Juicios de Sucesión - Civil)
+    7. Oficios de Investigaciones de Procesos de Sucesión (Juicios de Sucesión - Civil)
+    8. Oficios de Solo Notificación (Citaciones - Civil)
+    9. Oficios de Citaciones (Citaciones - Civil)
+    10. Oficios de Investigaciones Civiles (Investigaciones - Penal)
+    11. Oficios de Investigación de Familia (Investigaciones - Penal)
+    12. Oficios de Investigaciones de Procesos Penales (Investigaciones - Penal)
+    13. Oficios Solicitando Información de Clientes (Investigaciones - Penal)
+    14. Oficios de Inspección Ocular (Investigaciones - Penal)
+    15. Oficios de Allanamiento (Investigaciones - Penal)
+    16. Diligencia Exhibitoria (Investigaciones - Penal)
+
+    INSTRUCCIONES CRÍTICAS PARA EXTRACCIÓN DE PERSONAS:
+
+    🚨 **EXTREMADAMENTE IMPORTANTE - EXTRACCIÓN DE PERSONAS/CLIENTES:**
+
+    1. **BUSCA Y EXTRAE TODAS LAS TABLAS DEL DOCUMENTO**
+    - Identifica TODAS las tablas que contengan personas, clientes, agentes económicos, empleadores
+    - Extrae CADA FILA de CADA TABLA como un registro en "lista_clientes"
+    
+    2. **FORMATOS COMUNES DE TABLAS EN OFICIOS PANAMEÑOS:**
+    - Tablas con columnas: N° Exp. | Agente Económico | R.U.C. | Monto
+    - Tablas con columnas: Empleador | N° de empleador | RUC/C.I.P. | Monto
+    - Tablas con columnas: Nombre | Cédula | Cuenta | Monto
+    - Cualquier otra estructura tabular con personas
+
+    3. **DATOS A EXTRAER POR CADA PERSONA:**
+    - nombre_completo: SIEMPRE REQUERIDO (nombre de persona o razón social)
+    - numero_identificacion: Cédula (formato X-XXX-XXXX)
+    - numero_ruc: RUC (formato XXX-XXXXXX-XX-DV) o Folio
+    - numero_empleador: Si aplica (formato XX-XXX-XXXXX)
+    - monto: Texto del monto (ej: "1,500.00" o "B/. 1,500.00")
+    - monto_numerico: Valor numérico puro (ej: 1500.00)
+    - expediente: Número de expediente si se menciona
+    - tipo_persona: "Agente Económico", "Empleador", "Cliente", "Demandado", etc.
+
+    4. **EJEMPLOS DE EXTRACCIÓN:**
+
+    **Ejemplo de tabla en oficio:**
+    ```
+    | N° Exp. | Agente Económico | R.U.C. | Monto B/. |
+    | 146-2025 | MINI SUPER AYACUCHO/RICARDO QIU | 8-947-865, D.V. 86 | 467.50 |
+    ```
+
+    **DEBE extraerse como:**
+    ```json
+    {
+    "nombre_completo": "MINI SUPER AYACUCHO/RICARDO QIU ZHANG",
+    "numero_identificacion": "8-947-865",
+    "numero_ruc": "8-947-865, D.V. 86",
+    "monto": "467.50",
+    "monto_numerico": 467.50,
+    "expediente": "146-2025",
+    "tipo_persona": "Agente Económico"
+    }
+    ```
+
+    5. **VALIDACIONES:**
+    - Si hay tabla con personas, "lista_clientes" NO PUEDE estar vacía
+    - Extrae TODOS los registros, no solo algunos
+    - Si no hay tabla visible, busca en el texto menciones de personas con datos
+
+    6. **INFORMACIÓN GENERAL DEL DOCUMENTO:**
+    - Identifica número de oficio, fecha, autoridad
+    - Clasifica según los 16 tipos de oficios
+    - Extrae asunto y palabras clave
+
+    7. **TRANSCRIPCIÓN COMPLETA:**
+    - Incluye el texto completo del documento en "texto_completo"
+
+    RESPONDE EN FORMATO JSON ESTRUCTURADO siguiendo el schema exacto proporcionado."""
 
     def _call_mistral_ocr_api_with_retry(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -459,11 +553,29 @@ class OCRService:
                     if 'document_annotation' in api_response:
                         structured_data = api_response['document_annotation']
                         logger.info(f"📊 Found structured data in document_annotation")
+                        
+                        # Si viene como string, intentar parsearlo como JSON
+                        if isinstance(structured_data, str):
+                            try:
+                                structured_data = json.loads(structured_data)
+                                logger.info(f"✅ Parsed structured_data from string to dict")
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"⚠️ Failed to parse structured_data as JSON: {str(e)}")
+                                structured_data = None
             
             # Estrategia 3: Buscar en document_annotation directamente
             elif 'document_annotation' in api_response:
                 logger.info(f"📊 Found document_annotation in response")
                 structured_data = api_response['document_annotation']
+                
+                # Si viene como string, intentar parsearlo como JSON
+                if isinstance(structured_data, str):
+                    try:
+                        structured_data = json.loads(structured_data)
+                        logger.info(f"✅ Parsed structured_data from string to dict")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"⚠️ Failed to parse structured_data as JSON: {str(e)}")
+                        structured_data = None
                 
                 # Intentar extraer texto del documento estructurado
                 if isinstance(structured_data, dict):
