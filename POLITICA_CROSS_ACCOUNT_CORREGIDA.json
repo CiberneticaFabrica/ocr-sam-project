@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CiberneticaOCRAccess",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::390428552564:role/ocr-sam-stack-DocumentProcessorFunctionRole-0efPhhcJvImN",
+          "arn:aws:iam::390428552564:role/ocr-sam-stack-OCRProcessorFunctionRole-38pFvpYZALEs",
+          "arn:aws:iam::390428552564:role/ocr-sam-stack-CRMIntegratorFunctionRole-HH1YS0BjmWnX"
+        ]
+      },
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::poc-globalbank-662498641605-us-east-1",
+        "arn:aws:s3:::poc-globalbank-662498641605-us-east-1/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": ["input/", "processing/", "results/", "archive/"]
+        }
+      }
+    }
+  ]
+}
