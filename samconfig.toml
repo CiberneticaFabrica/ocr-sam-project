@@ -12,9 +12,9 @@ parameter_overrides = [
     "Environment=dev",
     "S3BucketName=ocr-legal-documents-dev",
     "MistralApiKey=fIGM8jrDAuWDzHnidpTJ8sJBWXHXx3qg",
-    "CreatioUrl=https://11006608-demo.creatio.com",
-    "CreatioUsername=Supervisor", 
-    "CreatioPassword=!k*ZPCT&MkuF2cDiM!S",
+    "CreatioUrl=https://dev-global-bank.creatio.com/",
+    "CreatioUsername=Edwin Penalba", 
+    "CreatioPassword=Ciber2025*",
     "EnableDynamoDB=true"
 ]
 [y.deploy.parameters]
@@ -24,5 +24,5 @@ s3_prefix = "ocr-sam-stack"
 region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-parameter_overrides = "Environment=\"dev\" S3BucketName=\"ocr-legal-documents-dev\" CreatioUrl=\"https://11006608-demo.creatio.com\" CreatioUsername=\"Supervisor\" EnableDynamoDB=\"true\""
+parameter_overrides = "Environment=\"dev\" S3BucketName=\"ocr-legal-documents-dev\" CreatioUrl=\"https://dev-global-bank.creatio.com/" CreatioUsername=\"Edwin Penalba\" EnableDynamoDB=\"true\""
 image_repositories = []

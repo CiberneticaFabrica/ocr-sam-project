@@ -32,7 +32,7 @@ Parameters:
   
   S3BucketName:
     Type: String
-    Default: ocr-legal-documents-v3-dev
+    Default: poc-globalbank-662498641605-us-west-2
     Description: S3 bucket for document storage
   
   MistralApiKey:
